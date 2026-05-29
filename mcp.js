@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAppTool, registerAppResource } from '@modelcontextprotocol/ext-apps/server';
@@ -11,18 +12,55 @@ const VIEWER_DOMAINS = [
     'https://fonts.autodesk.com',
 ];
 
-export function createMcpServer(authenticationProvider, publicUrl) {
+export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
+        description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
+
+    const loginRequiredResponse = {
+        content: [{
+            type: 'text',
+            text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.`,
+        }]
+    };
+
+    async function requireAuth() {
+        // if (authenticationProvider.isAuthenticated()) return null;
+
+        // try {
+        //     await server.server.elicitInput({
+        //         mode: 'url',
+        //         message: 'Please log in to Autodesk Platform Services. A browser window will open for authentication.',
+        //         elicitationId: randomUUID(),
+        //         url: authUrl,
+        //     });
+        // } catch {
+        //     // Client does not support URL elicitation; fall through to text response
+        // }
+
+        // if (!authenticationProvider.isAuthenticated()) {
+        //     return {
+        //         content: [{
+        //             type: 'text',
+        //             text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.`,
+        //         }]
+        //     };
+        // }
+        // return null;
+    }
 
     server.registerTool(
         'list-hubs-projects',
         {
-            description: 'Lists all hubs and their projects available to the APS application.',
+            description: 'Lists all hubs and their projects available to the authenticated user.',
         },
         async () => {
+            if (!authenticationProvider.isAuthenticated()) {
+                return loginRequiredResponse;
+            }
+
             const hubs = await getHubsProjects(authenticationProvider);
             const lines = [];
             for (const hub of hubs) {
@@ -46,6 +84,10 @@ export function createMcpServer(authenticationProvider, publicUrl) {
             })
         },
         async ({ hubId, projectId, folderId }) => {
+            if (!authenticationProvider.isAuthenticated()) {
+                return loginRequiredResponse;
+            }
+
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             const lines = [];
             for (const item of items) {
@@ -86,6 +128,10 @@ export function createMcpServer(authenticationProvider, publicUrl) {
             ui: { resourceUri: VIEWER_RESOURCE_URI },
         },
     }, async ({ projectId, designId, region = 'US' }) => {
+        if (!authenticationProvider.isAuthenticated()) {
+            return loginRequiredResponse;
+        }
+
         const accessToken = await authenticationProvider.getAccessToken();
         const tip = await getItemTip(projectId, designId, authenticationProvider);
         const config = {
