@@ -32,65 +32,65 @@ import { AuthenticationClient, ResponseType, Scopes } from '@aps_sdk/authenticat
 import { DataManagementClient } from '@aps_sdk/data-management';
 
 const SCOPES = [Scopes.DataRead];
-const authClient = new AuthenticationClient();
 
 export class UserAuthenticationProvider {
     constructor(clientId, clientSecret) {
+        this.authClient = new AuthenticationClient();
         this.clientId = clientId;
         this.clientSecret = clientSecret;
-        this.accessToken = null;
-        this.refreshToken = null;
-        this.expiresAt = 0;
+        this.cache = {
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: 0
+        };
     }
 
     isAuthenticated() {
-        return !!this.accessToken;
-    }
-
-    setTokens(accessToken, refreshToken, expiresIn) {
-        this.accessToken = accessToken;
-        this.refreshToken = refreshToken;
-        this.expiresAt = Date.now() + expiresIn * 1000;
+        return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
     }
 
     async getAccessToken() {
-        if (this.accessToken && this.expiresAt > Date.now()) return this.accessToken;
-        if (!this.refreshToken) throw new Error('Not authenticated');
-        const credentials = await authClient.refreshToken(this.refreshToken, this.clientId, {
+        if (this.isAuthenticated()) return this.cache.accessToken;
+        if (!this.cache.refreshToken) throw new Error('Not authenticated');
+        const credentials = await this.authClient.refreshToken(this.cache.refreshToken, this.clientId, {
             clientSecret: this.clientSecret,
             scopes: SCOPES,
         });
-        this.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
-        return this.accessToken;
+        this.cache.accessToken = credentials.access_token;
+        this.cache.refreshToken = credentials.refresh_token;
+        this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
+        return this.cache.accessToken;
     }
 }
 ```
 
-A single module-level `authClient` is shared across the provider and the two helpers below — the SDK client is stateless and reuse keeps the code lean.
+Each instance creates its own `AuthenticationClient`. Unlike the beginner's `AppAuthenticationProvider`, there is no module-level shared client — each user session is independent.
 
 Key differences from the beginner provider:
 
 - The cache holds **both** an access token (short-lived) and a refresh token (long-lived).
-- `setTokens(...)` is a separate method because the callback handler — not the provider — receives the initial tokens from the OAuth exchange.
-- `getAccessToken()` either returns the cached access token, refreshes it silently, or throws `Not authenticated` if the user never completed the OAuth flow.
-- `isAuthenticated()` is a tiny helper the MCP server uses to decide whether to short-circuit a tool call with a login URL.
+- `isAuthenticated()` checks that the token both exists and hasn't expired. The MCP server calls this to decide whether to return a login URL instead of running the tool.
+- `getAccessToken()` returns the cached token, refreshes it silently using the refresh token, or throws `Not authenticated` if the user hasn't completed OAuth yet.
 
 ## Step 2: Authorization URL & code exchange
 
-Add two helpers below the class:
+Add these two methods to `UserAuthenticationProvider`:
 
 ```js
-export function getAuthorizationUrl(clientId, callbackUrl, state) {
-    return authClient.authorize(clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
+getAuthorizationUrl(state, callbackUrl) {
+    return this.authClient.authorize(this.clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
 }
 
-export function exchangeAuthCode(clientId, clientSecret, code, callbackUrl) {
-    return authClient.getThreeLeggedToken(clientId, code, callbackUrl, { clientSecret });
+async exchangeAuthCode(code, callbackUrl) {
+    const credentials = await this.authClient.getThreeLeggedToken(this.clientId, code, callbackUrl, { clientSecret: this.clientSecret });
+    this.cache.accessToken = credentials.access_token;
+    this.cache.refreshToken = credentials.refresh_token;
+    this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
 }
 ```
 
-- `getAuthorizationUrl` builds the URL we hand to the user. The `state` is the MCP session ID, which lets the callback look up the right provider.
-- `exchangeAuthCode` swaps the one-time `code` for the initial access + refresh tokens.
+- `getAuthorizationUrl(state, callbackUrl)` builds the redirect URL. `state` is the MCP session ID — the OAuth server sends it back to the callback so we know which provider to populate.
+- `exchangeAuthCode(code, callbackUrl)` swaps the one-time `code` for access + refresh tokens and stores them directly in `this.cache`. The callback handler in `index.js` just calls this method; there is no separate token-setting step.
 
 ## Step 3: Keep the data helpers, add `getItemTip`
 
@@ -188,7 +188,7 @@ import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { UserAuthenticationProvider, exchangeAuthCode, getAuthorizationUrl } from './aps.js';
+import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
 const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
@@ -214,7 +214,7 @@ app.all('/mcp', async (req, res) => {
         if (!transport) {
             const sessionId = randomUUID();
             const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-            const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
+            const authUrl = authProvider.getAuthorizationUrl(sessionId, CALLBACK_URL);
             const server = createMcpServer(authProvider, authUrl);
             transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
             authProviders.set(sessionId, authProvider);
@@ -234,8 +234,7 @@ app.get('/auth/callback', async (req, res) => {
     const authProvider = authProviders.get(sessionId);
     if (!authProvider) return res.status(400).send('Invalid or expired session.');
     try {
-        const credentials = await exchangeAuthCode(APS_CLIENT_ID, APS_CLIENT_SECRET, code, CALLBACK_URL);
-        authProvider.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
+        await authProvider.exchangeAuthCode(code, CALLBACK_URL);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {
         console.error('Auth callback error:', err);
@@ -249,16 +248,16 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 The diff from Part 2:
 
 - A new `authProviders` map mirrors the existing `transports` map.
-- The handler reuses an existing transport when the `mcp-session-id` header matches one; otherwise it allocates a fresh `UserAuthenticationProvider`, generates an `authUrl` whose `state` is the session ID, and wires up a new `McpServer` + transport.
+- The handler reuses an existing transport when the `mcp-session-id` header matches one; otherwise it allocates a fresh `UserAuthenticationProvider`, calls `authProvider.getAuthorizationUrl(sessionId, CALLBACK_URL)` to generate the login URL, and wires up a new `McpServer` + transport.
 - `createMcpServer(authProvider, authUrl)` now takes the auth URL too so the tools can return it when the user is not yet authenticated.
 - A single `try/catch` rethrows failures as `McpError(ErrorCode.InternalError, ...)` — Express's default error handler turns that into a 500 with a proper JSON-RPC payload.
-- A new `/auth/callback` route resolves the right provider via the `state` parameter and populates it with the tokens APS returns.
+- A new `/auth/callback` route resolves the right provider via the `state` parameter and calls `authProvider.exchangeAuthCode(code, CALLBACK_URL)`, which stores the tokens internally.
 
 ## Checkpoint
 
 You should now have:
 
-- [x] `UserAuthenticationProvider`, `getAuthorizationUrl`, `exchangeAuthCode`, and `getItemTip` in `aps.js`
+- [x] `UserAuthenticationProvider` (with `getAuthorizationUrl` and `exchangeAuthCode` as instance methods) and `getItemTip` in `aps.js`
 - [x] `mcp.js` with `loginRequiredResponse` guards in both tool handlers
 - [x] `index.js` allocating per-session auth providers and serving `/auth/callback`
 
@@ -272,45 +271,46 @@ import { AuthenticationClient, ResponseType, Scopes } from '@aps_sdk/authenticat
 import { DataManagementClient } from '@aps_sdk/data-management';
 
 const SCOPES = [Scopes.DataRead];
-const authClient = new AuthenticationClient();
 
 export class UserAuthenticationProvider {
     constructor(clientId, clientSecret) {
+        this.authClient = new AuthenticationClient();
         this.clientId = clientId;
         this.clientSecret = clientSecret;
-        this.accessToken = null;
-        this.refreshToken = null;
-        this.expiresAt = 0;
+        this.cache = {
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: 0
+        };
     }
 
     isAuthenticated() {
-        return !!this.accessToken;
+        return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
     }
 
-    setTokens(accessToken, refreshToken, expiresIn) {
-        this.accessToken = accessToken;
-        this.refreshToken = refreshToken;
-        this.expiresAt = Date.now() + expiresIn * 1000;
+    getAuthorizationUrl(state, callbackUrl) {
+        return this.authClient.authorize(this.clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
+    }
+
+    async exchangeAuthCode(code, callbackUrl) {
+        const credentials = await this.authClient.getThreeLeggedToken(this.clientId, code, callbackUrl, { clientSecret: this.clientSecret });
+        this.cache.accessToken = credentials.access_token;
+        this.cache.refreshToken = credentials.refresh_token;
+        this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
     }
 
     async getAccessToken() {
-        if (this.accessToken && this.expiresAt > Date.now()) return this.accessToken;
-        if (!this.refreshToken) throw new Error('Not authenticated');
-        const credentials = await authClient.refreshToken(this.refreshToken, this.clientId, {
+        if (this.isAuthenticated()) return this.cache.accessToken;
+        if (!this.cache.refreshToken) throw new Error('Not authenticated');
+        const credentials = await this.authClient.refreshToken(this.cache.refreshToken, this.clientId, {
             clientSecret: this.clientSecret,
             scopes: SCOPES,
         });
-        this.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
-        return this.accessToken;
+        this.cache.accessToken = credentials.access_token;
+        this.cache.refreshToken = credentials.refresh_token;
+        this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
+        return this.cache.accessToken;
     }
-}
-
-export function getAuthorizationUrl(clientId, callbackUrl, state) {
-    return authClient.authorize(clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
-}
-
-export function exchangeAuthCode(clientId, clientSecret, code, callbackUrl) {
-    return authClient.getThreeLeggedToken(clientId, code, callbackUrl, { clientSecret });
 }
 
 export async function getHubsProjects(authenticationProvider) {
@@ -432,7 +432,7 @@ import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { UserAuthenticationProvider, exchangeAuthCode, getAuthorizationUrl } from './aps.js';
+import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
 const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
@@ -458,7 +458,7 @@ app.all('/mcp', async (req, res) => {
         if (!transport) {
             const sessionId = randomUUID();
             const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-            const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
+            const authUrl = authProvider.getAuthorizationUrl(sessionId, CALLBACK_URL);
             const server = createMcpServer(authProvider, authUrl);
             transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
             authProviders.set(sessionId, authProvider);
@@ -478,8 +478,7 @@ app.get('/auth/callback', async (req, res) => {
     const authProvider = authProviders.get(sessionId);
     if (!authProvider) return res.status(400).send('Invalid or expired session.');
     try {
-        const credentials = await exchangeAuthCode(APS_CLIENT_ID, APS_CLIENT_SECRET, code, CALLBACK_URL);
-        authProvider.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
+        await authProvider.exchangeAuthCode(code, CALLBACK_URL);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {
         console.error('Auth callback error:', err);

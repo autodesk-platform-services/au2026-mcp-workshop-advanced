@@ -387,7 +387,7 @@ import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { UserAuthenticationProvider, exchangeAuthCode, getAuthorizationUrl } from './aps.js';
+import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
 const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
@@ -413,7 +413,7 @@ app.all('/mcp', async (req, res) => {
         if (!transport) {
             const sessionId = randomUUID();
             const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-            const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
+            const authUrl = authProvider.getAuthorizationUrl(sessionId, CALLBACK_URL);
             const server = createMcpServer(authProvider, PUBLIC_URL, authUrl);
             transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
             authProviders.set(sessionId, authProvider);
@@ -433,8 +433,7 @@ app.get('/auth/callback', async (req, res) => {
     const authProvider = authProviders.get(sessionId);
     if (!authProvider) return res.status(400).send('Invalid or expired session.');
     try {
-        const credentials = await exchangeAuthCode(APS_CLIENT_ID, APS_CLIENT_SECRET, code, CALLBACK_URL);
-        authProvider.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
+        await authProvider.exchangeAuthCode(code, CALLBACK_URL);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {
         console.error('Auth callback error:', err);

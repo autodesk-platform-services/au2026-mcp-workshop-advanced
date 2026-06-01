@@ -3,7 +3,7 @@ import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { UserAuthenticationProvider, exchangeAuthCode, getAuthorizationUrl } from './aps.js';
+import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
 const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
