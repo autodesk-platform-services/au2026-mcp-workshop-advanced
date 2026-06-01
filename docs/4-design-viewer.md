@@ -32,6 +32,7 @@ Create the three files under `ui/`:
 ```html
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -39,10 +40,12 @@ Create the three files under `ui/`:
   <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
   <link rel="stylesheet" href="./viewer.css">
 </head>
+
 <body>
   <div id="viewer"></div>
   <script type="module" src="./viewer.js"></script>
 </body>
+
 </html>
 ```
 
@@ -253,6 +256,231 @@ You should now have:
 - [x] `vite.config.js` and a populated `dist/` directory after `npm run build`
 - [x] `mcp.js` registering the viewer resource and `preview-design` tool
 - [x] `index.js` passing `PUBLIC_URL` to `createMcpServer`
+
+<details>
+    <summary>
+        Reference: full <code>mcp.js</code>
+    </summary>
+
+```js
+import { z } from 'zod';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { registerAppTool, registerAppResource } from '@modelcontextprotocol/ext-apps/server';
+import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
+import VIEWER_HTML from './dist/viewer.js';
+
+const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
+const VIEWER_DOMAINS = [
+    'https://developer.api.autodesk.com',
+    'https://cdn.derivative.autodesk.com',
+    'https://fonts.autodesk.com',
+];
+
+export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
+    const server = new McpServer({
+        name: 'aps-mcp-server',
+        description: 'MCP server for Autodesk Platform Services',
+        version: '1.0.0'
+    });
+
+    const loginRequiredResponse = {
+        content: [{
+            type: 'text',
+            text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.`,
+        }]
+    };
+
+    const withAuth = (handler) => async (args, extra) =>
+        authenticationProvider.isAuthenticated() ? handler(args, extra) : loginRequiredResponse;
+
+    server.registerTool(
+        'list-hubs-projects',
+        { description: 'Lists all hubs and their projects available to the authenticated user.' },
+        withAuth(async () => {
+            const hubs = await getHubsProjects(authenticationProvider);
+            const text = hubs.flatMap(h => [
+                `- Hub: ${h.name} (ID: ${h.id}, region: ${h.region})`,
+                ...h.projects.map(p => `  - Project: ${p.name} (ID: ${p.id})`)
+            ]).join('\n');
+            return { content: [{ type: 'text', text }] };
+        })
+    );
+
+    server.registerTool(
+        'list-folder-contents',
+        {
+            description: 'Lists the contents of a folder in a project, or top-level folders if no folder ID is provided.',
+            inputSchema: z.object({
+                hubId: z.string().describe('Hub ID.'),
+                projectId: z.string().describe('Project ID.'),
+                folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
+            })
+        },
+        withAuth(async ({ hubId, projectId, folderId }) => {
+            const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
+            const text = items
+                .filter(i => i.type === 'folders' || i.type === 'items')
+                .map(i => i.type === 'folders'
+                    ? `- Folder: ${i.name} (ID: ${i.id})`
+                    : `- File: ${i.name} (ID: ${i.id}, Last modified at ${i.modifiedAt} by ${i.modifiedBy})`
+                ).join('\n');
+            return { content: [{ type: 'text', text }] };
+        })
+    );
+
+    registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
+        contents: [{
+            text: VIEWER_HTML,
+            _meta: {
+                ui: {
+                    domain: publicUrl,
+                    csp: {
+                        resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
+                        connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
+                    },
+                },
+            },
+        }]
+    }));
+
+    registerAppTool(server, 'preview-design', {
+        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
+        inputSchema: z.object({
+            projectId: z.string().describe('Project ID the design belongs to.'),
+            designId: z.string().describe('Item ID of the design to preview.'),
+            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
+        }),
+        annotations: { readOnlyHint: true },
+        _meta: {
+            ui: { resourceUri: VIEWER_RESOURCE_URI },
+        },
+    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
+        const [accessToken, tip] = await Promise.all([
+            authenticationProvider.getAccessToken(),
+            getItemTip(projectId, designId, authenticationProvider),
+        ]);
+        const config = {
+            accessToken,
+            env: 'AutodeskProduction2',
+            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
+        };
+        return {
+            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
+            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
+        };
+    }));
+
+    return server;
+}
+```
+
+</details>
+
+<details>
+    <summary>
+        Reference: full <code>index.js</code>
+    </summary>
+
+```js
+import { randomUUID } from 'crypto';
+import cors from 'cors';
+import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { UserAuthenticationProvider, exchangeAuthCode, getAuthorizationUrl } from './aps.js';
+import { createMcpServer } from './mcp.js';
+
+const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
+if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
+    console.error('APS_CLIENT_ID and APS_CLIENT_SECRET environment variables are required.');
+    process.exit(1);
+}
+const PORT = parseInt(process.env.PORT || '3000');
+const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
+
+const authProviders = new Map();
+const transports = new Map();
+
+const app = createMcpExpressApp({ host: '0.0.0.0' });
+app.use(cors());
+
+app.all('/mcp', async (req, res) => {
+    const incomingSessionId = req.headers['mcp-session-id'];
+    let transport = incomingSessionId && transports.get(incomingSessionId);
+
+    try {
+        if (!transport) {
+            const sessionId = randomUUID();
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
+            const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
+            const server = createMcpServer(authProvider, PUBLIC_URL, authUrl);
+            transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            authProviders.set(sessionId, authProvider);
+            transports.set(sessionId, transport);
+            await server.connect(transport);
+        }
+        await transport.handleRequest(req, res, req.body);
+    } catch (err) {
+        console.error('MCP error:', err);
+        throw new McpError(ErrorCode.InternalError, 'Internal server error');
+    }
+});
+
+app.get('/auth/callback', async (req, res) => {
+    const { code, state: sessionId } = req.query;
+    if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
+    const authProvider = authProviders.get(sessionId);
+    if (!authProvider) return res.status(400).send('Invalid or expired session.');
+    try {
+        const credentials = await exchangeAuthCode(APS_CLIENT_ID, APS_CLIENT_SECRET, code, CALLBACK_URL);
+        authProvider.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
+        res.send('Login successful! You can close this window and return to your AI assistant.');
+    } catch (err) {
+        console.error('Auth callback error:', err);
+        res.status(500).send('Authentication failed.');
+    }
+});
+
+app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
+```
+
+</details>
+
+<details>
+    <summary>
+        Reference: full <code>vite.config.js</code>
+    </summary>
+
+```js
+import { readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { defineConfig } from 'vite';
+import { viteSingleFile } from 'vite-plugin-singlefile';
+
+export default defineConfig({
+    root: './ui',
+    plugins: [
+        viteSingleFile(),
+        {
+            name: 'emit-viewer-module',
+            closeBundle() {
+                const html = readFileSync(join('dist', 'viewer.html'), 'utf-8');
+                writeFileSync(join('dist', 'viewer.js'), `export default ${JSON.stringify(html)};\n`);
+            },
+        },
+    ],
+    build: {
+        rollupOptions: {
+            input: './ui/viewer.html',
+        },
+        outDir: '../dist',
+        emptyOutDir: false,
+    },
+});
+```
+
+</details>
 
 ### Try it out
 

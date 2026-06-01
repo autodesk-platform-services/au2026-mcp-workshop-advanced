@@ -2,45 +2,46 @@ import { AuthenticationClient, ResponseType, Scopes } from '@aps_sdk/authenticat
 import { DataManagementClient } from '@aps_sdk/data-management';
 
 const SCOPES = [Scopes.DataRead];
-const authClient = new AuthenticationClient();
 
 export class UserAuthenticationProvider {
     constructor(clientId, clientSecret) {
+        this.authClient = new AuthenticationClient();
         this.clientId = clientId;
         this.clientSecret = clientSecret;
-        this.accessToken = null;
-        this.refreshToken = null;
-        this.expiresAt = 0;
+        this.cache = {
+            accessToken: null,
+            refreshToken: null,
+            expiresAt: 0
+        };
     }
 
     isAuthenticated() {
-        return !!this.accessToken;
+        return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
     }
 
-    setTokens(accessToken, refreshToken, expiresIn) {
-        this.accessToken = accessToken;
-        this.refreshToken = refreshToken;
-        this.expiresAt = Date.now() + expiresIn * 1000;
+    getAuthorizationUrl(state, callbackUrl) {
+        return this.authClient.authorize(this.clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
+    }
+
+    async exchangeAuthCode(code, callbackUrl) {
+        const credentials = await this.authClient.getThreeLeggedToken(this.clientId, code, callbackUrl, { clientSecret: this.clientSecret });
+        this.cache.accessToken = credentials.access_token;
+        this.cache.refreshToken = credentials.refresh_token;
+        this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
     }
 
     async getAccessToken() {
-        if (this.accessToken && this.expiresAt > Date.now()) return this.accessToken;
-        if (!this.refreshToken) throw new Error('Not authenticated');
-        const credentials = await authClient.refreshToken(this.refreshToken, this.clientId, {
+        if (this.isAuthenticated()) return this.cache.accessToken;
+        if (!this.cache.refreshToken) throw new Error('Not authenticated');
+        const credentials = await this.authClient.refreshToken(this.cache.refreshToken, this.clientId, {
             clientSecret: this.clientSecret,
             scopes: SCOPES,
         });
-        this.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
-        return this.accessToken;
+        this.cache.accessToken = credentials.access_token;
+        this.cache.refreshToken = credentials.refresh_token;
+        this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
+        return this.cache.accessToken;
     }
-}
-
-export function getAuthorizationUrl(clientId, callbackUrl, state) {
-    return authClient.authorize(clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
-}
-
-export function exchangeAuthCode(clientId, clientSecret, code, callbackUrl) {
-    return authClient.getThreeLeggedToken(clientId, code, callbackUrl, { clientSecret });
 }
 
 export async function getHubsProjects(authenticationProvider) {

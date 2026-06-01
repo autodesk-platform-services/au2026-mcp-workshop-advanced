@@ -123,6 +123,7 @@ import { getHubsProjects, getFolderContents } from './aps.js';
 export function createMcpServer(authenticationProvider, authUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
+        description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
 
@@ -348,6 +349,145 @@ export async function getItemTip(projectId, itemId, authenticationProvider) {
         derivativeUrn: data.relationships.derivatives.data.id
     };
 }
+```
+
+</details>
+
+<details>
+    <summary>
+        Reference: full <code>mcp.js</code>
+    </summary>
+
+```js
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { getHubsProjects, getFolderContents } from './aps.js';
+
+export function createMcpServer(authenticationProvider, authUrl) {
+    const server = new McpServer({
+        name: 'aps-mcp-server',
+        description: 'MCP server for Autodesk Platform Services',
+        version: '1.0.0'
+    });
+
+    const loginRequiredResponse = {
+        content: [{
+            type: 'text',
+            text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.`,
+        }]
+    };
+
+    const withAuth = (handler) => async (args, extra) =>
+        authenticationProvider.isAuthenticated() ? handler(args, extra) : loginRequiredResponse;
+
+    server.registerTool(
+        'list-hubs-projects',
+        { description: 'Lists all hubs and their projects available to the authenticated user.' },
+        withAuth(async () => {
+            const hubs = await getHubsProjects(authenticationProvider);
+            const text = hubs.flatMap(h => [
+                `- Hub: ${h.name} (ID: ${h.id}, region: ${h.region})`,
+                ...h.projects.map(p => `  - Project: ${p.name} (ID: ${p.id})`)
+            ]).join('\n');
+            return { content: [{ type: 'text', text }] };
+        })
+    );
+
+    server.registerTool(
+        'list-folder-contents',
+        {
+            description: 'Lists the contents of a folder in a project, or top-level folders if no folder ID is provided.',
+            inputSchema: z.object({
+                hubId: z.string().describe('Hub ID.'),
+                projectId: z.string().describe('Project ID.'),
+                folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
+            })
+        },
+        withAuth(async ({ hubId, projectId, folderId }) => {
+            const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
+            const text = items
+                .filter(i => i.type === 'folders' || i.type === 'items')
+                .map(i => i.type === 'folders'
+                    ? `- Folder: ${i.name} (ID: ${i.id})`
+                    : `- File: ${i.name} (ID: ${i.id}, Last modified at ${i.modifiedAt} by ${i.modifiedBy})`
+                ).join('\n');
+            return { content: [{ type: 'text', text }] };
+        })
+    );
+
+    return server;
+}
+```
+
+</details>
+
+<details>
+    <summary>
+        Reference: full <code>index.js</code>
+    </summary>
+
+```js
+import { randomUUID } from 'crypto';
+import cors from 'cors';
+import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { UserAuthenticationProvider, exchangeAuthCode, getAuthorizationUrl } from './aps.js';
+import { createMcpServer } from './mcp.js';
+
+const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
+if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
+    console.error('APS_CLIENT_ID and APS_CLIENT_SECRET environment variables are required.');
+    process.exit(1);
+}
+const PORT = parseInt(process.env.PORT || '3000');
+const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
+
+const authProviders = new Map();
+const transports = new Map();
+
+const app = createMcpExpressApp({ host: '0.0.0.0' });
+app.use(cors());
+
+app.all('/mcp', async (req, res) => {
+    const incomingSessionId = req.headers['mcp-session-id'];
+    let transport = incomingSessionId && transports.get(incomingSessionId);
+
+    try {
+        if (!transport) {
+            const sessionId = randomUUID();
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
+            const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
+            const server = createMcpServer(authProvider, authUrl);
+            transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            authProviders.set(sessionId, authProvider);
+            transports.set(sessionId, transport);
+            await server.connect(transport);
+        }
+        await transport.handleRequest(req, res, req.body);
+    } catch (err) {
+        console.error('MCP error:', err);
+        throw new McpError(ErrorCode.InternalError, 'Internal server error');
+    }
+});
+
+app.get('/auth/callback', async (req, res) => {
+    const { code, state: sessionId } = req.query;
+    if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
+    const authProvider = authProviders.get(sessionId);
+    if (!authProvider) return res.status(400).send('Invalid or expired session.');
+    try {
+        const credentials = await exchangeAuthCode(APS_CLIENT_ID, APS_CLIENT_SECRET, code, CALLBACK_URL);
+        authProvider.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
+        res.send('Login successful! You can close this window and return to your AI assistant.');
+    } catch (err) {
+        console.error('Auth callback error:', err);
+        res.status(500).send('Authentication failed.');
+    }
+});
+
+app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
 ```
 
 </details>
