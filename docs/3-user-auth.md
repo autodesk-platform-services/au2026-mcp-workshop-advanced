@@ -28,7 +28,7 @@ MCP defines an "elicit input" capability that lets a server ask the client (Copi
 Open `aps.js` and replace the imports + `AppAuthenticationProvider` class with the user-level equivalent:
 
 ```js
-import { AuthenticationClient, ResponseType, Scopes } from '@aps_sdk/authentication';
+import { AuthenticationClient, Scopes, ResponseType } from '@aps_sdk/authentication';
 import { DataManagementClient } from '@aps_sdk/data-management';
 
 const SCOPES = [Scopes.DataRead];
@@ -49,17 +49,22 @@ export class UserAuthenticationProvider {
         return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
     }
 
-    async getAccessToken() {
-        if (this.isAuthenticated()) return this.cache.accessToken;
-        if (!this.cache.refreshToken) throw new Error('Not authenticated');
-        const credentials = await this.authClient.refreshToken(this.cache.refreshToken, this.clientId, {
-            clientSecret: this.clientSecret,
-            scopes: SCOPES,
-        });
+    async refreshAccessToken(refreshToken) {
+        const credentials = await this.authClient.refreshToken(refreshToken, this.clientId, { clientSecret: this.clientSecret });
         this.cache.accessToken = credentials.access_token;
         this.cache.refreshToken = credentials.refresh_token;
         this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
-        return this.cache.accessToken;
+    }
+
+    async getAccessToken() {
+        if (this.cache.accessToken && this.cache.expiresAt > Date.now()) {
+            return this.cache.accessToken;
+        } else if (this.cache.refreshToken) {
+            await this.refreshAccessToken(this.cache.refreshToken);
+            return this.cache.accessToken;
+        } else {
+            throw new Error('Not authenticated');
+        }
     }
 }
 ```
@@ -127,26 +132,18 @@ export function createMcpServer(authenticationProvider, authUrl) {
         version: '1.0.0'
     });
 
-    const loginRequiredResponse = {
-        content: [{
-            type: 'text',
-            text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.`,
-        }]
-    };
-
-    const withAuth = (handler) => async (args, extra) =>
-        authenticationProvider.isAuthenticated() ? handler(args, extra) : loginRequiredResponse;
+    const withAuth = (handler) => async (args, extra) => authenticationProvider.isAuthenticated()
+        ? handler(args, extra)
+        : { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
 
     server.registerTool(
         'list-hubs-projects',
-        { description: 'Lists all hubs and their projects available to the authenticated user.' },
+        {
+            description: 'Lists all hubs and their projects available to the authenticated user.'
+        },
         withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
-            const text = hubs.flatMap(h => [
-                `- Hub: ${h.name} (ID: ${h.id}, region: ${h.region})`,
-                ...h.projects.map(p => `  - Project: ${p.name} (ID: ${p.id})`)
-            ]).join('\n');
-            return { content: [{ type: 'text', text }] };
+            return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
         })
     );
 
@@ -162,13 +159,7 @@ export function createMcpServer(authenticationProvider, authUrl) {
         },
         withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
-            const text = items
-                .filter(i => i.type === 'folders' || i.type === 'items')
-                .map(i => i.type === 'folders'
-                    ? `- Folder: ${i.name} (ID: ${i.id})`
-                    : `- File: ${i.name} (ID: ${i.id}, Last modified at ${i.modifiedAt} by ${i.modifiedBy})`
-                ).join('\n');
-            return { content: [{ type: 'text', text }] };
+            return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
         })
     );
 
@@ -176,7 +167,7 @@ export function createMcpServer(authenticationProvider, authUrl) {
 }
 ```
 
-The shared `loginRequiredResponse` is the fallback for clients without URL elicitation. The tiny `withAuth` wrapper short-circuits any handler when the session isn't yet authenticated, so the AI sees a clear message it can show to the user.
+The tiny `withAuth` wrapper short-circuits any handler when the session isn't yet authenticated, returning the authorization URL inline so the AI sees a clear message it can show to the user.
 
 ## Step 5: Per-session providers + callback route
 
@@ -258,7 +249,7 @@ The diff from Part 2:
 You should now have:
 
 - [x] `UserAuthenticationProvider` (with `getAuthorizationUrl` and `exchangeAuthCode` as instance methods) and `getItemTip` in `aps.js`
-- [x] `mcp.js` with `loginRequiredResponse` guards in both tool handlers
+- [x] `mcp.js` with `withAuth` guards in both tool handlers
 - [x] `index.js` allocating per-session auth providers and serving `/auth/callback`
 
 <details>
@@ -267,7 +258,7 @@ You should now have:
     </summary>
 
 ```js
-import { AuthenticationClient, ResponseType, Scopes } from '@aps_sdk/authentication';
+import { AuthenticationClient, Scopes, ResponseType } from '@aps_sdk/authentication';
 import { DataManagementClient } from '@aps_sdk/data-management';
 
 const SCOPES = [Scopes.DataRead];
@@ -299,17 +290,22 @@ export class UserAuthenticationProvider {
         this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
     }
 
-    async getAccessToken() {
-        if (this.isAuthenticated()) return this.cache.accessToken;
-        if (!this.cache.refreshToken) throw new Error('Not authenticated');
-        const credentials = await this.authClient.refreshToken(this.cache.refreshToken, this.clientId, {
-            clientSecret: this.clientSecret,
-            scopes: SCOPES,
-        });
+    async refreshAccessToken(refreshToken) {
+        const credentials = await this.authClient.refreshToken(refreshToken, this.clientId, { clientSecret: this.clientSecret });
         this.cache.accessToken = credentials.access_token;
         this.cache.refreshToken = credentials.refresh_token;
         this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
-        return this.cache.accessToken;
+    }
+
+    async getAccessToken() {
+        if (this.cache.accessToken && this.cache.expiresAt > Date.now()) {
+            return this.cache.accessToken;
+        } else if (this.cache.refreshToken) {
+            await this.refreshAccessToken(this.cache.refreshToken);
+            return this.cache.accessToken;
+        } else {
+            throw new Error('Not authenticated');
+        }
     }
 }
 
@@ -370,26 +366,18 @@ export function createMcpServer(authenticationProvider, authUrl) {
         version: '1.0.0'
     });
 
-    const loginRequiredResponse = {
-        content: [{
-            type: 'text',
-            text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.`,
-        }]
-    };
-
-    const withAuth = (handler) => async (args, extra) =>
-        authenticationProvider.isAuthenticated() ? handler(args, extra) : loginRequiredResponse;
+    const withAuth = (handler) => async (args, extra) => authenticationProvider.isAuthenticated()
+        ? handler(args, extra)
+        : { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
 
     server.registerTool(
         'list-hubs-projects',
-        { description: 'Lists all hubs and their projects available to the authenticated user.' },
+        {
+            description: 'Lists all hubs and their projects available to the authenticated user.'
+        },
         withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
-            const text = hubs.flatMap(h => [
-                `- Hub: ${h.name} (ID: ${h.id}, region: ${h.region})`,
-                ...h.projects.map(p => `  - Project: ${p.name} (ID: ${p.id})`)
-            ]).join('\n');
-            return { content: [{ type: 'text', text }] };
+            return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
         })
     );
 
@@ -405,13 +393,7 @@ export function createMcpServer(authenticationProvider, authUrl) {
         },
         withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
-            const text = items
-                .filter(i => i.type === 'folders' || i.type === 'items')
-                .map(i => i.type === 'folders'
-                    ? `- Folder: ${i.name} (ID: ${i.id})`
-                    : `- File: ${i.name} (ID: ${i.id}, Last modified at ${i.modifiedAt} by ${i.modifiedBy})`
-                ).join('\n');
-            return { content: [{ type: 'text', text }] };
+            return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
         })
     );
 

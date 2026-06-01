@@ -1,4 +1,4 @@
-import { AuthenticationClient, ResponseType, Scopes } from '@aps_sdk/authentication';
+import { AuthenticationClient, Scopes, ResponseType } from '@aps_sdk/authentication';
 import { DataManagementClient } from '@aps_sdk/data-management';
 
 const SCOPES = [Scopes.DataRead];
@@ -30,17 +30,22 @@ export class UserAuthenticationProvider {
         this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
     }
 
-    async getAccessToken() {
-        if (this.isAuthenticated()) return this.cache.accessToken;
-        if (!this.cache.refreshToken) throw new Error('Not authenticated');
-        const credentials = await this.authClient.refreshToken(this.cache.refreshToken, this.clientId, {
-            clientSecret: this.clientSecret,
-            scopes: SCOPES,
-        });
+    async refreshAccessToken(refreshToken) {
+        const credentials = await this.authClient.refreshToken(refreshToken, this.clientId, { clientSecret: this.clientSecret });
         this.cache.accessToken = credentials.access_token;
         this.cache.refreshToken = credentials.refresh_token;
         this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
-        return this.cache.accessToken;
+    }
+
+    async getAccessToken() {
+        if (this.cache.accessToken && this.cache.expiresAt > Date.now()) {
+            return this.cache.accessToken;
+        } else if (this.cache.refreshToken) {
+            await this.refreshAccessToken(this.cache.refreshToken);
+            return this.cache.accessToken;
+        } else {
+            throw new Error('Not authenticated');
+        }
     }
 }
 

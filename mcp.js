@@ -1,6 +1,6 @@
-import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAppTool, registerAppResource } from '@modelcontextprotocol/ext-apps/server';
+import { z } from 'zod';
 import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
 import VIEWER_HTML from './dist/viewer.js';
 
@@ -18,26 +18,18 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
         version: '1.0.0'
     });
 
-    const loginRequiredResponse = {
-        content: [{
-            type: 'text',
-            text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.`,
-        }]
-    };
-
-    const withAuth = (handler) => async (args, extra) =>
-        authenticationProvider.isAuthenticated() ? handler(args, extra) : loginRequiredResponse;
+    const withAuth = (handler) => async (args, extra) => authenticationProvider.isAuthenticated()
+        ? handler(args, extra)
+        : { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
 
     server.registerTool(
         'list-hubs-projects',
-        { description: 'Lists all hubs and their projects available to the authenticated user.' },
+        {
+            description: 'Lists all hubs and their projects available to the authenticated user.'
+        },
         withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
-            const text = hubs.flatMap(h => [
-                `- Hub: ${h.name} (ID: ${h.id}, region: ${h.region})`,
-                ...h.projects.map(p => `  - Project: ${p.name} (ID: ${p.id})`)
-            ]).join('\n');
-            return { content: [{ type: 'text', text }] };
+            return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
         })
     );
 
@@ -53,13 +45,7 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
         },
         withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
-            const text = items
-                .filter(i => i.type === 'folders' || i.type === 'items')
-                .map(i => i.type === 'folders'
-                    ? `- Folder: ${i.name} (ID: ${i.id})`
-                    : `- File: ${i.name} (ID: ${i.id}, Last modified at ${i.modifiedAt} by ${i.modifiedBy})`
-                ).join('\n');
-            return { content: [{ type: 'text', text }] };
+            return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
         })
     );
 
@@ -90,10 +76,8 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
             ui: { resourceUri: VIEWER_RESOURCE_URI },
         },
     }, withAuth(async ({ projectId, designId, region = 'US' }) => {
-        const [accessToken, tip] = await Promise.all([
-            authenticationProvider.getAccessToken(),
-            getItemTip(projectId, designId, authenticationProvider),
-        ]);
+        const accessToken = await authenticationProvider.getAccessToken();
+        const tip = await getItemTip(projectId, designId, authenticationProvider);
         const config = {
             accessToken,
             env: 'AutodeskProduction2',
