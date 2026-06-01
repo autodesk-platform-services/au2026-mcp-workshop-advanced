@@ -4,10 +4,11 @@ import { DataManagementClient } from '@aps_sdk/data-management';
 const SCOPES = [Scopes.DataRead];
 
 export class UserAuthenticationProvider {
-    constructor(clientId, clientSecret) {
+    constructor(clientId, clientSecret, callbackUrl) {
         this.authClient = new AuthenticationClient();
         this.clientId = clientId;
         this.clientSecret = clientSecret;
+        this.callbackUrl = callbackUrl;
         this.cache = {
             accessToken: null,
             refreshToken: null,
@@ -19,12 +20,12 @@ export class UserAuthenticationProvider {
         return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
     }
 
-    getAuthorizationUrl(state, callbackUrl) {
-        return this.authClient.authorize(this.clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
+    getAuthorizationUrl(state) {
+        return this.authClient.authorize(this.clientId, ResponseType.Code, this.callbackUrl, SCOPES, { state });
     }
 
-    async exchangeAuthCode(code, callbackUrl) {
-        const credentials = await this.authClient.getThreeLeggedToken(this.clientId, code, callbackUrl, { clientSecret: this.clientSecret });
+    async exchangeAuthCode(code) {
+        const credentials = await this.authClient.getThreeLeggedToken(this.clientId, code, this.callbackUrl, { clientSecret: this.clientSecret });
         this.cache.accessToken = credentials.access_token;
         this.cache.refreshToken = credentials.refresh_token;
         this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;

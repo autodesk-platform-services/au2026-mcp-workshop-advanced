@@ -11,13 +11,14 @@ const VIEWER_DOMAINS = [
     'https://fonts.autodesk.com',
 ];
 
-export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
+export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
 
+    const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
     const withAuth = (handler) => async (args, extra) => authenticationProvider.isAuthenticated()
         ? handler(args, extra)
         : { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
@@ -71,7 +72,6 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
             designId: z.string().describe('Item ID of the design to preview.'),
             region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
         }),
-        annotations: { readOnlyHint: true },
         _meta: {
             ui: { resourceUri: VIEWER_RESOURCE_URI },
         },

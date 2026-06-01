@@ -179,11 +179,11 @@ const VIEWER_DOMAINS = [
 
 The `VIEWER_DOMAINS` list ends up in the resource's Content Security Policy so the embedded viewer can call the APS APIs it depends on.
 
-Change the factory signature to accept the public URL (needed for the CSP) and register the resource + tool **before** `return server`:
+Add `publicUrl` to the factory signature (needed for the viewer CSP) and register the resource + tool **before** `return server`:
 
 ```js
-export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
-    // ... existing McpServer, withAuth, and two registerTool calls ...
+export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
+    // ... existing McpServer, withAuth (using getAuthorizationUrl(sessionId)), and two registerTool calls ...
 
     registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
         contents: [{
@@ -207,7 +207,6 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
             designId: z.string().describe('Item ID of the design to preview.'),
             region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
         }),
-        annotations: { readOnlyHint: true },
         _meta: {
             ui: { resourceUri: VIEWER_RESOURCE_URI },
         },
@@ -238,10 +237,10 @@ What's new versus a normal tool:
 
 ## Step 4: Update the entry point
 
-`index.js` already builds the per-session auth provider and auth URL. Pass the public URL through to the factory so the viewer resource knows which origin to whitelist:
+`index.js` already builds the per-session auth provider. Pass `sessionId` and `PUBLIC_URL` through to the factory so the viewer resource knows which origin to whitelist:
 
 ```js
-const server = createMcpServer(authProvider, PUBLIC_URL, authUrl);
+const server = createMcpServer(authProvider, sessionId, PUBLIC_URL);
 ```
 
 That's the only change in `index.js`.
@@ -274,13 +273,14 @@ const VIEWER_DOMAINS = [
     'https://fonts.autodesk.com',
 ];
 
-export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
+export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
 
+    const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
     const withAuth = (handler) => async (args, extra) => authenticationProvider.isAuthenticated()
         ? handler(args, extra)
         : { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
@@ -334,7 +334,6 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
             designId: z.string().describe('Item ID of the design to preview.'),
             region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
         }),
-        annotations: { readOnlyHint: true },
         _meta: {
             ui: { resourceUri: VIEWER_RESOURCE_URI },
         },
@@ -364,7 +363,7 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
     </summary>
 
 ```js
-import { randomUUID } from 'crypto';
+import crypto from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -379,7 +378,6 @@ if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
 }
 const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
-const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
 
 const authProviders = new Map();
 const transports = new Map();
@@ -393,10 +391,9 @@ app.all('/mcp', async (req, res) => {
 
     try {
         if (!transport) {
-            const sessionId = randomUUID();
-            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-            const authUrl = authProvider.getAuthorizationUrl(sessionId, CALLBACK_URL);
-            const server = createMcpServer(authProvider, PUBLIC_URL, authUrl);
+            const sessionId = crypto.randomUUID();
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, `${PUBLIC_URL}/auth/callback`);
+            const server = createMcpServer(authProvider, sessionId, PUBLIC_URL);
             transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
             authProviders.set(sessionId, authProvider);
             transports.set(sessionId, transport);
@@ -415,7 +412,7 @@ app.get('/auth/callback', async (req, res) => {
     const authProvider = authProviders.get(sessionId);
     if (!authProvider) return res.status(400).send('Invalid or expired session.');
     try {
-        await authProvider.exchangeAuthCode(code, CALLBACK_URL);
+        await authProvider.exchangeAuthCode(code);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {
         console.error('Auth callback error:', err);

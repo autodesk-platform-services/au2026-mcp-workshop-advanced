@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto';
+import crypto from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -13,7 +13,6 @@ if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
 }
 const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
-const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
 
 const authProviders = new Map();
 const transports = new Map();
@@ -27,10 +26,9 @@ app.all('/mcp', async (req, res) => {
 
     try {
         if (!transport) {
-            const sessionId = randomUUID();
-            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-            const authUrl = authProvider.getAuthorizationUrl(sessionId, CALLBACK_URL);
-            const server = createMcpServer(authProvider, PUBLIC_URL, authUrl);
+            const sessionId = crypto.randomUUID();
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, `${PUBLIC_URL}/auth/callback`);
+            const server = createMcpServer(authProvider, sessionId, PUBLIC_URL);
             transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
             authProviders.set(sessionId, authProvider);
             transports.set(sessionId, transport);
@@ -49,7 +47,7 @@ app.get('/auth/callback', async (req, res) => {
     const authProvider = authProviders.get(sessionId);
     if (!authProvider) return res.status(400).send('Invalid or expired session.');
     try {
-        const credentials = await authProvider.exchangeAuthCode(code, CALLBACK_URL);
+        await authProvider.exchangeAuthCode(code);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {
         console.error('Auth callback error:', err);
