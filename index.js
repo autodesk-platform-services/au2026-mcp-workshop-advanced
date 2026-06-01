@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { UserAuthenticationProvider, exchangeAuthCode, getAuthorizationUrl } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -22,57 +23,31 @@ app.use(cors());
 
 app.all('/mcp', async (req, res) => {
     const incomingSessionId = req.headers['mcp-session-id'];
-
-    if (incomingSessionId && transports.has(incomingSessionId)) {
-        const transport = transports.get(incomingSessionId);
-        try {
-            await transport.handleRequest(req, res, req.body);
-        } catch (err) {
-            console.error('MCP error:', err);
-            if (!res.headersSent) {
-                res.status(500).json({
-                    jsonrpc: '2.0',
-                    error: { code: -32603, message: 'Internal server error' },
-                    id: null
-                });
-            }
-        }
-        return;
-    }
-
-    const sessionId = randomUUID();
-    const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-    const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
-    const server = createMcpServer(authProvider, PUBLIC_URL, authUrl);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-
-    authProviders.set(sessionId, authProvider);
-    transports.set(sessionId, transport);
+    let transport = incomingSessionId && transports.get(incomingSessionId);
 
     try {
-        await server.connect(transport);
+        if (!transport) {
+            const sessionId = randomUUID();
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
+            const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
+            const server = createMcpServer(authProvider, PUBLIC_URL, authUrl);
+            transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            authProviders.set(sessionId, authProvider);
+            transports.set(sessionId, transport);
+            await server.connect(transport);
+        }
         await transport.handleRequest(req, res, req.body);
     } catch (err) {
         console.error('MCP error:', err);
-        if (!res.headersSent) {
-            res.status(500).json({
-                jsonrpc: '2.0',
-                error: { code: -32603, message: 'Internal server error' },
-                id: null
-            });
-        }
+        throw new McpError(ErrorCode.InternalError, 'Internal server error');
     }
 });
 
 app.get('/auth/callback', async (req, res) => {
     const { code, state: sessionId } = req.query;
-    if (!code || !sessionId) {
-        return res.status(400).send('Missing code or state parameter.');
-    }
+    if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
     const authProvider = authProviders.get(sessionId);
-    if (!authProvider) {
-        return res.status(400).send('Invalid or expired session.');
-    }
+    if (!authProvider) return res.status(400).send('Invalid or expired session.');
     try {
         const credentials = await exchangeAuthCode(APS_CLIENT_ID, APS_CLIENT_SECRET, code, CALLBACK_URL);
         authProvider.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);

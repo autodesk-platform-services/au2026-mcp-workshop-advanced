@@ -1,13 +1,8 @@
 import { App } from '@modelcontextprotocol/ext-apps';
 
 const app = new App({ name: 'Design Viewer', version: '1.0.0' });
-app.ontoolresult = (result) => {
-    console.debug('Tool result received:', result);
-    const urn = result.structuredContent?.urn;
-    const config = result.structuredContent?.config;
-    if (urn && config) {
-        loadModel(urn, config);
-    }
+app.ontoolresult = ({ structuredContent: { urn, config } = {} }) => {
+    if (urn && config) loadModel(urn, config);
 };
 app.connect();
 app.requestDisplayMode({ mode: 'pip' });
@@ -17,26 +12,14 @@ let viewerInitializedPromise = null;
 function loadModel(urn, config) {
     if (!viewerInitializedPromise) {
         viewerInitializedPromise = new Promise((resolve) => {
-            Autodesk.Viewing.Initializer(config, function () {
-                const viewer = new Autodesk.Viewing.GuiViewer3D(
-                    document.getElementById('viewer')
-                );
+            Autodesk.Viewing.Initializer(config, () => {
+                const viewer = new Autodesk.Viewing.GuiViewer3D(document.getElementById('viewer'));
                 viewer.start();
-                viewer.addEventListener(
-                    Autodesk.Viewing.SELECTION_CHANGED_EVENT,
-                    async () => {
-                        const ids = viewer.getSelection();
-                        if (ids.length > 0) {
-                            await app.updateModelContext({
-                                content: [{ type: 'text', text: `User selected objects with IDs: ${ids.join(', ')}` }],
-                            });
-                        } else {
-                            await app.updateModelContext({
-                                content: [{ type: 'text', text: 'No objects selected' }],
-                            });
-                        }
-                    }
-                );
+                viewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, () => {
+                    const ids = viewer.getSelection();
+                    const text = ids.length ? `User selected objects with IDs: ${ids.join(', ')}` : 'No objects selected';
+                    app.updateModelContext({ content: [{ type: 'text', text }] });
+                });
                 resolve(viewer);
             });
         });
@@ -45,8 +28,7 @@ function loadModel(urn, config) {
         Autodesk.Viewing.Document.load(
             'urn:' + urn,
             (doc) => viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry()),
-            (errorCode, errorMessage, errors) =>
-                console.error('Failed to load document:', errorCode, errorMessage, errors)
+            (errorCode, errorMessage, errors) => console.error('Failed to load document:', errorCode, errorMessage, errors)
         );
     });
 }

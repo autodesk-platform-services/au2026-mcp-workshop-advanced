@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerAppTool, registerAppResource } from '@modelcontextprotocol/ext-apps/server';
@@ -26,51 +25,20 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
         }]
     };
 
-    async function requireAuth() {
-        // if (authenticationProvider.isAuthenticated()) return null;
-
-        // try {
-        //     await server.server.elicitInput({
-        //         mode: 'url',
-        //         message: 'Please log in to Autodesk Platform Services. A browser window will open for authentication.',
-        //         elicitationId: randomUUID(),
-        //         url: authUrl,
-        //     });
-        // } catch {
-        //     // Client does not support URL elicitation; fall through to text response
-        // }
-
-        // if (!authenticationProvider.isAuthenticated()) {
-        //     return {
-        //         content: [{
-        //             type: 'text',
-        //             text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.`,
-        //         }]
-        //     };
-        // }
-        // return null;
-    }
+    const withAuth = (handler) => async (args, extra) =>
+        authenticationProvider.isAuthenticated() ? handler(args, extra) : loginRequiredResponse;
 
     server.registerTool(
         'list-hubs-projects',
-        {
-            description: 'Lists all hubs and their projects available to the authenticated user.',
-        },
-        async () => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredResponse;
-            }
-
+        { description: 'Lists all hubs and their projects available to the authenticated user.' },
+        withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
-            const lines = [];
-            for (const hub of hubs) {
-                lines.push(`- Hub: ${hub.name} (ID: ${hub.id}, region: ${hub.region})`);
-                for (const project of hub.projects) {
-                    lines.push(`  - Project: ${project.name} (ID: ${project.id})`);
-                }
-            }
-            return { content: [{ type: 'text', text: lines.join('\n') }] };
-        }
+            const text = hubs.flatMap(h => [
+                `- Hub: ${h.name} (ID: ${h.id}, region: ${h.region})`,
+                ...h.projects.map(p => `  - Project: ${p.name} (ID: ${p.id})`)
+            ]).join('\n');
+            return { content: [{ type: 'text', text }] };
+        })
     );
 
     server.registerTool(
@@ -83,22 +51,16 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        async ({ hubId, projectId, folderId }) => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredResponse;
-            }
-
+        withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
-            const lines = [];
-            for (const item of items) {
-                if (item.type === 'folders') {
-                    lines.push(`- Folder: ${item.name} (ID: ${item.id})`);
-                } else if (item.type === 'items') {
-                    lines.push(`- File: ${item.name} (ID: ${item.id}, Last modified at ${item.modifiedAt} by ${item.modifiedBy})`);
-                }
-            }
-            return { content: [{ type: 'text', text: lines.join('\n') }] };
-        }
+            const text = items
+                .filter(i => i.type === 'folders' || i.type === 'items')
+                .map(i => i.type === 'folders'
+                    ? `- Folder: ${i.name} (ID: ${i.id})`
+                    : `- File: ${i.name} (ID: ${i.id}, Last modified at ${i.modifiedAt} by ${i.modifiedBy})`
+                ).join('\n');
+            return { content: [{ type: 'text', text }] };
+        })
     );
 
     registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
@@ -127,13 +89,11 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
         _meta: {
             ui: { resourceUri: VIEWER_RESOURCE_URI },
         },
-    }, async ({ projectId, designId, region = 'US' }) => {
-        if (!authenticationProvider.isAuthenticated()) {
-            return loginRequiredResponse;
-        }
-
-        const accessToken = await authenticationProvider.getAccessToken();
-        const tip = await getItemTip(projectId, designId, authenticationProvider);
+    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
+        const [accessToken, tip] = await Promise.all([
+            authenticationProvider.getAccessToken(),
+            getItemTip(projectId, designId, authenticationProvider),
+        ]);
         const config = {
             accessToken,
             env: 'AutodeskProduction2',
@@ -143,7 +103,7 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
             structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
             content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
         };
-    });
+    }));
 
     return server;
 }

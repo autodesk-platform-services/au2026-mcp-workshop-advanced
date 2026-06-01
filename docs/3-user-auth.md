@@ -32,10 +32,10 @@ import { AuthenticationClient, ResponseType, Scopes } from '@aps_sdk/authenticat
 import { DataManagementClient } from '@aps_sdk/data-management';
 
 const SCOPES = [Scopes.DataRead];
+const authClient = new AuthenticationClient();
 
 export class UserAuthenticationProvider {
     constructor(clientId, clientSecret) {
-        this.authClient = new AuthenticationClient();
         this.clientId = clientId;
         this.clientSecret = clientSecret;
         this.accessToken = null;
@@ -44,7 +44,7 @@ export class UserAuthenticationProvider {
     }
 
     isAuthenticated() {
-        return this.accessToken !== null;
+        return !!this.accessToken;
     }
 
     setTokens(accessToken, refreshToken, expiresIn) {
@@ -54,13 +54,9 @@ export class UserAuthenticationProvider {
     }
 
     async getAccessToken() {
-        if (this.accessToken && this.expiresAt > Date.now()) {
-            return this.accessToken;
-        }
-        if (!this.refreshToken) {
-            throw new Error('Not authenticated');
-        }
-        const credentials = await this.authClient.refreshToken(this.refreshToken, this.clientId, {
+        if (this.accessToken && this.expiresAt > Date.now()) return this.accessToken;
+        if (!this.refreshToken) throw new Error('Not authenticated');
+        const credentials = await authClient.refreshToken(this.refreshToken, this.clientId, {
             clientSecret: this.clientSecret,
             scopes: SCOPES,
         });
@@ -69,6 +65,8 @@ export class UserAuthenticationProvider {
     }
 }
 ```
+
+A single module-level `authClient` is shared across the provider and the two helpers below — the SDK client is stateless and reuse keeps the code lean.
 
 Key differences from the beginner provider:
 
@@ -83,12 +81,10 @@ Add two helpers below the class:
 
 ```js
 export function getAuthorizationUrl(clientId, callbackUrl, state) {
-    const authClient = new AuthenticationClient();
     return authClient.authorize(clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
 }
 
-export async function exchangeAuthCode(clientId, clientSecret, code, callbackUrl) {
-    const authClient = new AuthenticationClient();
+export function exchangeAuthCode(clientId, clientSecret, code, callbackUrl) {
     return authClient.getThreeLeggedToken(clientId, code, callbackUrl, { clientSecret });
 }
 ```
@@ -105,10 +101,10 @@ While you're here, add one more helper that Part 4 will need: `getItemTip` retur
 ```js
 export async function getItemTip(projectId, itemId, authenticationProvider) {
     const client = new DataManagementClient({ authenticationProvider });
-    const response = await client.getItemTip(projectId, itemId);
+    const { data } = await client.getItemTip(projectId, itemId);
     return {
-        name: response.data.attributes.displayName,
-        derivativeUrn: response.data.relationships.derivatives.data.id
+        name: data.attributes.displayName,
+        derivativeUrn: data.relationships.derivatives.data.id
     };
 }
 ```
@@ -137,25 +133,20 @@ export function createMcpServer(authenticationProvider, authUrl) {
         }]
     };
 
+    const withAuth = (handler) => async (args, extra) =>
+        authenticationProvider.isAuthenticated() ? handler(args, extra) : loginRequiredResponse;
+
     server.registerTool(
         'list-hubs-projects',
-        {
-            description: 'Lists all hubs and their projects available to the authenticated user.',
-        },
-        async () => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredResponse;
-            }
+        { description: 'Lists all hubs and their projects available to the authenticated user.' },
+        withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
-            const lines = [];
-            for (const hub of hubs) {
-                lines.push(`- Hub: ${hub.name} (ID: ${hub.id}, region: ${hub.region})`);
-                for (const project of hub.projects) {
-                    lines.push(`  - Project: ${project.name} (ID: ${project.id})`);
-                }
-            }
-            return { content: [{ type: 'text', text: lines.join('\n') }] };
-        }
+            const text = hubs.flatMap(h => [
+                `- Hub: ${h.name} (ID: ${h.id}, region: ${h.region})`,
+                ...h.projects.map(p => `  - Project: ${p.name} (ID: ${p.id})`)
+            ]).join('\n');
+            return { content: [{ type: 'text', text }] };
+        })
     );
 
     server.registerTool(
@@ -168,28 +159,23 @@ export function createMcpServer(authenticationProvider, authUrl) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        async ({ hubId, projectId, folderId }) => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredResponse;
-            }
+        withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
-            const lines = [];
-            for (const item of items) {
-                if (item.type === 'folders') {
-                    lines.push(`- Folder: ${item.name} (ID: ${item.id})`);
-                } else if (item.type === 'items') {
-                    lines.push(`- File: ${item.name} (ID: ${item.id}, Last modified at ${item.modifiedAt} by ${item.modifiedBy})`);
-                }
-            }
-            return { content: [{ type: 'text', text: lines.join('\n') }] };
-        }
+            const text = items
+                .filter(i => i.type === 'folders' || i.type === 'items')
+                .map(i => i.type === 'folders'
+                    ? `- Folder: ${i.name} (ID: ${i.id})`
+                    : `- File: ${i.name} (ID: ${i.id}, Last modified at ${i.modifiedAt} by ${i.modifiedBy})`
+                ).join('\n');
+            return { content: [{ type: 'text', text }] };
+        })
     );
 
     return server;
 }
 ```
 
-The shared `loginRequiredResponse` object is the fallback for clients without URL elicitation. Both handlers bail out early when the session isn't authenticated, so the AI sees a clear message it can show to the user.
+The shared `loginRequiredResponse` is the fallback for clients without URL elicitation. The tiny `withAuth` wrapper short-circuits any handler when the session isn't yet authenticated, so the AI sees a clear message it can show to the user.
 
 ## Step 5: Per-session providers + callback route
 
@@ -200,6 +186,7 @@ import { randomUUID } from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { UserAuthenticationProvider, exchangeAuthCode, getAuthorizationUrl } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -220,38 +207,39 @@ app.use(cors());
 
 app.all('/mcp', async (req, res) => {
     const incomingSessionId = req.headers['mcp-session-id'];
+    let transport = incomingSessionId && transports.get(incomingSessionId);
 
-    if (incomingSessionId && transports.has(incomingSessionId)) {
-        const transport = transports.get(incomingSessionId);
+    try {
+        if (!transport) {
+            const sessionId = randomUUID();
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
+            const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
+            const server = createMcpServer(authProvider, authUrl);
+            transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            authProviders.set(sessionId, authProvider);
+            transports.set(sessionId, transport);
+            await server.connect(transport);
+        }
         await transport.handleRequest(req, res, req.body);
-        return;
+    } catch (err) {
+        console.error('MCP error:', err);
+        throw new McpError(ErrorCode.InternalError, 'Internal server error');
     }
-
-    const sessionId = randomUUID();
-    const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-    const authUrl = getAuthorizationUrl(APS_CLIENT_ID, CALLBACK_URL, sessionId);
-    const server = createMcpServer(authProvider, authUrl);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-
-    authProviders.set(sessionId, authProvider);
-    transports.set(sessionId, transport);
-
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
 });
 
 app.get('/auth/callback', async (req, res) => {
     const { code, state: sessionId } = req.query;
-    if (!code || !sessionId) {
-        return res.status(400).send('Missing code or state parameter.');
-    }
+    if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
     const authProvider = authProviders.get(sessionId);
-    if (!authProvider) {
-        return res.status(400).send('Invalid or expired session.');
+    if (!authProvider) return res.status(400).send('Invalid or expired session.');
+    try {
+        const credentials = await exchangeAuthCode(APS_CLIENT_ID, APS_CLIENT_SECRET, code, CALLBACK_URL);
+        authProvider.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
+        res.send('Login successful! You can close this window and return to your AI assistant.');
+    } catch (err) {
+        console.error('Auth callback error:', err);
+        res.status(500).send('Authentication failed.');
     }
-    const credentials = await exchangeAuthCode(APS_CLIENT_ID, APS_CLIENT_SECRET, code, CALLBACK_URL);
-    authProvider.setTokens(credentials.access_token, credentials.refresh_token, credentials.expires_in);
-    res.send('Login successful! You can close this window and return to your AI assistant.');
 });
 
 app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
@@ -260,8 +248,9 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 The diff from Part 2:
 
 - A new `authProviders` map mirrors the existing `transports` map.
-- Each new session gets a fresh `UserAuthenticationProvider` and an `authUrl` whose `state` is the session ID.
+- The handler reuses an existing transport when the `mcp-session-id` header matches one; otherwise it allocates a fresh `UserAuthenticationProvider`, generates an `authUrl` whose `state` is the session ID, and wires up a new `McpServer` + transport.
 - `createMcpServer(authProvider, authUrl)` now takes the auth URL too so the tools can return it when the user is not yet authenticated.
+- A single `try/catch` rethrows failures as `McpError(ErrorCode.InternalError, ...)` — Express's default error handler turns that into a 500 with a proper JSON-RPC payload.
 - A new `/auth/callback` route resolves the right provider via the `state` parameter and populates it with the tokens APS returns.
 
 ## Checkpoint
@@ -282,10 +271,10 @@ import { AuthenticationClient, ResponseType, Scopes } from '@aps_sdk/authenticat
 import { DataManagementClient } from '@aps_sdk/data-management';
 
 const SCOPES = [Scopes.DataRead];
+const authClient = new AuthenticationClient();
 
 export class UserAuthenticationProvider {
     constructor(clientId, clientSecret) {
-        this.authClient = new AuthenticationClient();
         this.clientId = clientId;
         this.clientSecret = clientSecret;
         this.accessToken = null;
@@ -294,7 +283,7 @@ export class UserAuthenticationProvider {
     }
 
     isAuthenticated() {
-        return this.accessToken !== null;
+        return !!this.accessToken;
     }
 
     setTokens(accessToken, refreshToken, expiresIn) {
@@ -304,13 +293,9 @@ export class UserAuthenticationProvider {
     }
 
     async getAccessToken() {
-        if (this.accessToken && this.expiresAt > Date.now()) {
-            return this.accessToken;
-        }
-        if (!this.refreshToken) {
-            throw new Error('Not authenticated');
-        }
-        const credentials = await this.authClient.refreshToken(this.refreshToken, this.clientId, {
+        if (this.accessToken && this.expiresAt > Date.now()) return this.accessToken;
+        if (!this.refreshToken) throw new Error('Not authenticated');
+        const credentials = await authClient.refreshToken(this.refreshToken, this.clientId, {
             clientSecret: this.clientSecret,
             scopes: SCOPES,
         });
@@ -320,39 +305,32 @@ export class UserAuthenticationProvider {
 }
 
 export function getAuthorizationUrl(clientId, callbackUrl, state) {
-    const authClient = new AuthenticationClient();
     return authClient.authorize(clientId, ResponseType.Code, callbackUrl, SCOPES, { state });
 }
 
-export async function exchangeAuthCode(clientId, clientSecret, code, callbackUrl) {
-    const authClient = new AuthenticationClient();
+export function exchangeAuthCode(clientId, clientSecret, code, callbackUrl) {
     return authClient.getThreeLeggedToken(clientId, code, callbackUrl, { clientSecret });
 }
 
 export async function getHubsProjects(authenticationProvider) {
     const client = new DataManagementClient({ authenticationProvider });
-    const response = await client.getHubs();
-    const hubs = response.data || [];
-    const results = [];
-    for (const hub of hubs) {
-        const response = await client.getHubProjects(hub.id);
-        const projects = response.data || [];
-        results.push({
+    const { data: hubs = [] } = await client.getHubs();
+    return Promise.all(hubs.map(async hub => {
+        const { data: projects = [] } = await client.getHubProjects(hub.id);
+        return {
             id: hub.id,
             name: hub.attributes.name,
             region: hub.attributes.region,
             projects: projects.map(p => ({ id: p.id, name: p.attributes.name }))
-        });
-    }
-    return results;
+        };
+    }));
 }
 
 export async function getFolderContents(hubId, projectId, folderId, authenticationProvider) {
     const client = new DataManagementClient({ authenticationProvider });
-    const response = folderId
+    const { data: items = [] } = folderId
         ? await client.getFolderContents(projectId, folderId)
         : await client.getProjectTopFolders(hubId, projectId);
-    const items = response.data || [];
     return items.map(item => ({
         type: item.type,
         id: item.id,
@@ -364,10 +342,10 @@ export async function getFolderContents(hubId, projectId, folderId, authenticati
 
 export async function getItemTip(projectId, itemId, authenticationProvider) {
     const client = new DataManagementClient({ authenticationProvider });
-    const response = await client.getItemTip(projectId, itemId);
+    const { data } = await client.getItemTip(projectId, itemId);
     return {
-        name: response.data.attributes.displayName,
-        derivativeUrn: response.data.relationships.derivatives.data.id
+        name: data.attributes.displayName,
+        derivativeUrn: data.relationships.derivatives.data.id
     };
 }
 ```

@@ -71,12 +71,8 @@ body {
 import { App } from '@modelcontextprotocol/ext-apps';
 
 const app = new App({ name: 'Design Viewer', version: '1.0.0' });
-app.ontoolresult = (result) => {
-    const urn = result.structuredContent?.urn;
-    const config = result.structuredContent?.config;
-    if (urn && config) {
-        loadModel(urn, config);
-    }
+app.ontoolresult = ({ structuredContent: { urn, config } = {} }) => {
+    if (urn && config) loadModel(urn, config);
 };
 app.connect();
 app.requestDisplayMode({ mode: 'pip' });
@@ -86,15 +82,13 @@ let viewerInitializedPromise = null;
 function loadModel(urn, config) {
     if (!viewerInitializedPromise) {
         viewerInitializedPromise = new Promise((resolve) => {
-            Autodesk.Viewing.Initializer(config, function () {
+            Autodesk.Viewing.Initializer(config, () => {
                 const viewer = new Autodesk.Viewing.GuiViewer3D(document.getElementById('viewer'));
                 viewer.start();
-                viewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, async () => {
+                viewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, () => {
                     const ids = viewer.getSelection();
-                    const text = ids.length > 0
-                        ? `User selected objects with IDs: ${ids.join(', ')}`
-                        : 'No objects selected';
-                    await app.updateModelContext({ content: [{ type: 'text', text }] });
+                    const text = ids.length ? `User selected objects with IDs: ${ids.join(', ')}` : 'No objects selected';
+                    app.updateModelContext({ content: [{ type: 'text', text }] });
                 });
                 resolve(viewer);
             });
@@ -186,7 +180,7 @@ Change the factory signature to accept the public URL (needed for the CSP) and r
 
 ```js
 export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
-    // ... existing McpServer, loginRequiredResponse, and two registerTool calls ...
+    // ... existing McpServer, loginRequiredResponse, withAuth, and two registerTool calls ...
 
     registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
         contents: [{
@@ -214,12 +208,11 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
         _meta: {
             ui: { resourceUri: VIEWER_RESOURCE_URI },
         },
-    }, async ({ projectId, designId, region = 'US' }) => {
-        if (!authenticationProvider.isAuthenticated()) {
-            return loginRequiredResponse;
-        }
-        const accessToken = await authenticationProvider.getAccessToken();
-        const tip = await getItemTip(projectId, designId, authenticationProvider);
+    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
+        const [accessToken, tip] = await Promise.all([
+            authenticationProvider.getAccessToken(),
+            getItemTip(projectId, designId, authenticationProvider),
+        ]);
         const config = {
             accessToken,
             env: 'AutodeskProduction2',
@@ -229,7 +222,7 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
             structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
             content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
         };
-    });
+    }));
 
     return server;
 }
@@ -238,8 +231,9 @@ export function createMcpServer(authenticationProvider, publicUrl, authUrl) {
 What's new versus a normal tool:
 
 - `_meta.ui.resourceUri` tells the client which app resource to surface alongside this tool's result.
+- The handler is wrapped with the same `withAuth` helper used by the other tools — no extra guard boilerplate.
 - The handler returns **both** `structuredContent` (consumed by `viewer.js` via `ontoolresult`) and a plain text `content` block (shown to the user / model as a confirmation).
-- The access token is short-lived and is included in `structuredContent.config` so the viewer can authenticate its own requests to the derivative service.
+- The access token and item tip are fetched in parallel with `Promise.all`. The token is short-lived and is included in `structuredContent.config` so the viewer can authenticate its own requests to the derivative service.
 
 ## Step 4: Update the entry point
 
