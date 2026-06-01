@@ -134,19 +134,20 @@ export function createMcpServer(authenticationProvider, sessionId) {
     });
 
     const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
-    const withAuth = (handler) => async (args, extra) => authenticationProvider.isAuthenticated()
-        ? handler(args, extra)
-        : { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
+    const loginRequiredContent = { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
 
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        withAuth(async () => {
+        async () => {
+            if (!authenticationProvider.isAuthenticated()) {
+                return loginRequiredContent;
+            }
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        })
+        }
     );
 
     server.registerTool(
@@ -159,17 +160,20 @@ export function createMcpServer(authenticationProvider, sessionId) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        withAuth(async ({ hubId, projectId, folderId }) => {
+        async ({ hubId, projectId, folderId }) => {
+            if (!authenticationProvider.isAuthenticated()) {
+                return loginRequiredContent;
+            }
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        })
+        }
     );
 
     return server;
 }
 ```
 
-The factory calls `getAuthorizationUrl(sessionId)` itself — `index.js` no longer needs to compute or pass the auth URL. The tiny `withAuth` wrapper short-circuits any handler when the session isn't yet authenticated, returning that URL inline so the AI sees a clear message it can show to the user.
+The factory calls `getAuthorizationUrl(sessionId)` itself — `index.js` no longer needs to compute or pass the auth URL. Each handler opens with a `isAuthenticated()` check: when the session isn't yet authenticated it returns the shared `loginRequiredContent` payload, so the AI sees a clear message (with the login URL) it can show to the user.
 
 ## Step 5: Per-session providers + callback route
 
@@ -248,7 +252,7 @@ The diff from Part 2:
 You should now have:
 
 - [x] `UserAuthenticationProvider` (with `getAuthorizationUrl` and `exchangeAuthCode` as instance methods) and `getItemTip` in `aps.js`
-- [x] `mcp.js` with `withAuth` guards in both tool handlers
+- [x] `mcp.js` with `isAuthenticated()` guards in both tool handlers
 - [x] `index.js` allocating per-session auth providers and serving `/auth/callback`
 
 <details>
@@ -367,19 +371,20 @@ export function createMcpServer(authenticationProvider, sessionId) {
     });
 
     const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
-    const withAuth = (handler) => async (args, extra) => authenticationProvider.isAuthenticated()
-        ? handler(args, extra)
-        : { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
+    const loginRequiredContent = { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
 
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        withAuth(async () => {
+        async () => {
+            if (!authenticationProvider.isAuthenticated()) {
+                return loginRequiredContent;
+            }
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        })
+        }
     );
 
     server.registerTool(
@@ -392,10 +397,13 @@ export function createMcpServer(authenticationProvider, sessionId) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        withAuth(async ({ hubId, projectId, folderId }) => {
+        async ({ hubId, projectId, folderId }) => {
+            if (!authenticationProvider.isAuthenticated()) {
+                return loginRequiredContent;
+            }
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        })
+        }
     );
 
     return server;

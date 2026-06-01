@@ -19,19 +19,20 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
     });
 
     const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
-    const withAuth = (handler) => async (args, extra) => authenticationProvider.isAuthenticated()
-        ? handler(args, extra)
-        : { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
+    const loginRequiredContent = { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
 
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        withAuth(async () => {
+        async () => {
+            if (!authenticationProvider.isAuthenticated()) {
+                return loginRequiredContent;
+            }
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        })
+        }
     );
 
     server.registerTool(
@@ -44,10 +45,13 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        withAuth(async ({ hubId, projectId, folderId }) => {
+        async ({ hubId, projectId, folderId }) => {
+            if (!authenticationProvider.isAuthenticated()) {
+                return loginRequiredContent;
+            }
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        })
+        }
     );
 
     registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
@@ -75,7 +79,10 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
         _meta: {
             ui: { resourceUri: VIEWER_RESOURCE_URI },
         },
-    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
+    }, async ({ projectId, designId, region = 'US' }) => {
+        if (!authenticationProvider.isAuthenticated()) {
+            return loginRequiredContent;
+        }
         const accessToken = await authenticationProvider.getAccessToken();
         const tip = await getItemTip(projectId, designId, authenticationProvider);
         const config = {
@@ -87,7 +94,7 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
             structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
             content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
         };
-    }));
+    });
 
     return server;
 }
