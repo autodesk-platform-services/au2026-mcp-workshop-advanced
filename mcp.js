@@ -11,28 +11,29 @@ const VIEWER_DOMAINS = [
     'https://fonts.autodesk.com',
 ];
 
-export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
+export function createMcpServer(authenticationProvider, authUrl, publicUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
 
-    const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
-    const loginRequiredContent = { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
+    const withAuth = (handler) => async (input) => {
+        if (!authenticationProvider.isAuthenticated()) {
+            return { content: [{ type: 'text', text: `Authentication is required. Please log in at: ${authUrl}` }] };
+        }
+        return await handler(input);
+    };
 
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        async () => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredContent;
-            }
+        withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        }
+        })
     );
 
     server.registerTool(
@@ -45,14 +46,35 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        async ({ hubId, projectId, folderId }) => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredContent;
-            }
+        withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        }
+        })
     );
+
+    registerAppTool(server, 'preview-design', {
+        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
+        inputSchema: z.object({
+            projectId: z.string().describe('Project ID the design belongs to.'),
+            designId: z.string().describe('Item ID of the design to preview.'),
+            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
+        }),
+        _meta: {
+            ui: { resourceUri: VIEWER_RESOURCE_URI },
+        },
+    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
+        const accessToken = await authenticationProvider.getAccessToken();
+        const tip = await getItemTip(projectId, designId, authenticationProvider);
+        const config = {
+            accessToken,
+            env: 'AutodeskProduction2',
+            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
+        };
+        return {
+            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
+            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
+        };
+    }));
 
     registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
         contents: [{
@@ -68,33 +90,6 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
             },
         }]
     }));
-
-    registerAppTool(server, 'preview-design', {
-        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
-        inputSchema: z.object({
-            projectId: z.string().describe('Project ID the design belongs to.'),
-            designId: z.string().describe('Item ID of the design to preview.'),
-            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
-        }),
-        _meta: {
-            ui: { resourceUri: VIEWER_RESOURCE_URI },
-        },
-    }, async ({ projectId, designId, region = 'US' }) => {
-        if (!authenticationProvider.isAuthenticated()) {
-            return loginRequiredContent;
-        }
-        const accessToken = await authenticationProvider.getAccessToken();
-        const tip = await getItemTip(projectId, designId, authenticationProvider);
-        const config = {
-            accessToken,
-            env: 'AutodeskProduction2',
-            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
-        };
-        return {
-            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
-            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
-        };
-    });
 
     return server;
 }

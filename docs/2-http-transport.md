@@ -69,10 +69,11 @@ export function createMcpServer(authenticationProvider) {
 Replace `index.js` with the HTTP-based version:
 
 ```js
-import { randomUUID } from 'crypto';
+import crypto from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { AppAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -91,21 +92,37 @@ const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());
 
 app.all('/mcp', async (req, res) => {
-    const incomingSessionId = req.headers['mcp-session-id'];
+    let sessionId = req.headers['mcp-session-id'];
 
-    if (incomingSessionId && transports.has(incomingSessionId)) {
-        const transport = transports.get(incomingSessionId);
-        await transport.handleRequest(req, res, req.body);
-        return;
+    try {
+        if (sessionId && transports.has(sessionId)) {
+            const transport = transports.get(sessionId);
+            await transport.handleRequest(req, res, req.body);
+        } else if (!sessionId && isInitializeRequest(req.body)) {
+            sessionId = crypto.randomUUID();
+            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            transports.set(sessionId, transport);
+            transport.onclose = () => transports.delete(sessionId);
+            const server = createMcpServer(authenticationProvider);
+            await server.connect(transport);
+            await transport.handleRequest(req, res, req.body);
+        } else {
+            res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+                id: null,
+            });
+        }
+    } catch (err) {
+        console.error('MCP error:', err);
+        if (!res.headersSent) {
+            res.status(500).json({
+                jsonrpc: '2.0',
+                error: { code: -32603, message: 'Internal server error' },
+                id: null,
+            });
+        }
     }
-
-    const sessionId = randomUUID();
-    const server = createMcpServer(authenticationProvider);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-    transports.set(sessionId, transport);
-
-    await server.connect(transport);
-    await transport.handleRequest(req, res, req.body);
 });
 
 app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
@@ -114,9 +131,10 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 What's happening:
 
 - `createMcpExpressApp` is an Express app pre-configured by the MCP SDK with the body parsers it expects. Mount your own middleware on it — we add `cors()` so browser-based clients can reach the endpoint.
-- The `/mcp` route is shared by all sessions. If the request already carries an `mcp-session-id`, look up the transport from the map and forward the request to it.
-- Otherwise allocate a new session ID, build a per-session `McpServer` + `StreamableHTTPServerTransport`, store the transport, and serve the request from the fresh pair.
-- Wrap the handler in `try/catch` in production. The snippet keeps things short for readability.
+- The `/mcp` route is shared by all sessions. A request carrying a known `mcp-session-id` is served from its stored transport.
+- A request with no session header is only let through when it is an `initialize` request — `isInitializeRequest(req.body)` guards this. Anything else (a stale session ID, or a non-initialize call with no session) gets a `400` JSON-RPC error. For a genuine initialize, generate a session ID, build a per-session `McpServer` + `StreamableHTTPServerTransport`, register it, and connect.
+- Because we generate the session ID ourselves and pass it to `sessionIdGenerator`, the transport can register in the map immediately; `transport.onclose` removes it again, so the map only ever holds live sessions.
+- The `try/catch` replies with a `500` JSON-RPC error (guarded by `res.headersSent`) if anything throws, rather than leaking the exception. Part 3 builds directly on this structure.
 
 > **Public URL.** `PUBLIC_URL` is unused right now but worth threading through — Part 3 needs it for the OAuth callback and Part 4 needs it for the viewer's CSP.
 

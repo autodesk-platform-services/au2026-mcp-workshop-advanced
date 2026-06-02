@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -13,40 +13,55 @@ if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
 }
 const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
 
-const authProviders = new Map();
-const transports = new Map();
+const sessions = new Map();
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());
 
 app.all('/mcp', async (req, res) => {
-    const incomingSessionId = req.headers['mcp-session-id'];
-    let transport = incomingSessionId && transports.get(incomingSessionId);
+    let sessionId = req.headers['mcp-session-id'];
 
     try {
-        if (!transport) {
-            const sessionId = crypto.randomUUID();
-            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, `${PUBLIC_URL}/auth/callback`);
-            const server = createMcpServer(authProvider, sessionId, PUBLIC_URL);
-            transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-            authProviders.set(sessionId, authProvider);
-            transports.set(sessionId, transport);
+        if (sessionId && sessions.has(sessionId)) {
+            const { transport } = sessions.get(sessionId);
+            await transport.handleRequest(req, res, req.body);
+        } else if (!sessionId && isInitializeRequest(req.body)) {
+            sessionId = crypto.randomUUID();
+            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, CALLBACK_URL);
+            sessions.set(sessionId, { transport, authProvider });
+            transport.onclose = () => sessions.delete(sessionId);
+            const authUrl = authProvider.getAuthorizationUrl(sessionId);
+            const server = createMcpServer(authProvider, authUrl, PUBLIC_URL);
             await server.connect(transport);
+            await transport.handleRequest(req, res, req.body);
+        } else {
+            res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+                id: null,
+            });
         }
-        await transport.handleRequest(req, res, req.body);
     } catch (err) {
         console.error('MCP error:', err);
-        throw new McpError(ErrorCode.InternalError, 'Internal server error');
+        if (!res.headersSent) {
+            res.status(500).json({
+                jsonrpc: '2.0',
+                error: { code: -32603, message: 'Internal server error' },
+                id: null,
+            });
+        }
     }
 });
 
 app.get('/auth/callback', async (req, res) => {
     const { code, state: sessionId } = req.query;
     if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
-    const authProvider = authProviders.get(sessionId);
-    if (!authProvider) return res.status(400).send('Invalid or expired session.');
+    if (!sessions.has(sessionId)) return res.status(400).send('Invalid or expired session ID.');
     try {
+        const { authProvider } = sessions.get(sessionId);
         await authProvider.exchangeAuthCode(code);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {

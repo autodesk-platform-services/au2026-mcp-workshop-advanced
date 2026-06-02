@@ -17,7 +17,7 @@ The flow is:
 
 ### Per-session providers
 
-In Part 2 the whole process shared a single `AppAuthenticationProvider`. With user tokens that won't work — each session must hold its own credentials. We'll move the auth provider into a `Map` keyed by session ID, alongside the existing transports map, and use the session ID as the OAuth `state` parameter so the callback knows which provider to populate.
+In Part 2 the whole process shared a single `AppAuthenticationProvider`. With user tokens that won't work — each session must hold its own credentials. We'll keep a single `sessions` map keyed by session ID, where each entry bundles that session's transport **and** its own `UserAuthenticationProvider`. The session ID doubles as the OAuth `state` parameter, so the callback knows which provider to populate.
 
 ### Login URL elicitation — and the fallback
 
@@ -119,35 +119,36 @@ export async function getItemTip(projectId, itemId, authenticationProvider) {
 
 A 3-legged session has no tokens until the user has logged in. The MCP tools need to detect that and respond with the authorization URL instead of crashing with `Not authenticated`.
 
-Update `mcp.js` so the factory accepts the session ID alongside the auth provider, generates the auth URL internally, and adds a guard at the top of each handler:
+Update `mcp.js` so the factory accepts the login URL alongside the auth provider, and wraps each handler in a small `withAuth` helper that short-circuits to a login prompt when the session isn't authenticated yet:
 
 ```js
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents } from './aps.js';
 
-export function createMcpServer(authenticationProvider, sessionId) {
+export function createMcpServer(authenticationProvider, authUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
 
-    const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
-    const loginRequiredContent = { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
+    const withAuth = (handler) => async (input) => {
+        if (!authenticationProvider.isAuthenticated()) {
+            return { content: [{ type: 'text', text: `Authentication is required. Please log in at: ${authUrl}` }] };
+        }
+        return await handler(input);
+    };
 
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        async () => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredContent;
-            }
+        withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        }
+        })
     );
 
     server.registerTool(
@@ -160,31 +161,28 @@ export function createMcpServer(authenticationProvider, sessionId) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        async ({ hubId, projectId, folderId }) => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredContent;
-            }
+        withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        }
+        })
     );
 
     return server;
 }
 ```
 
-The factory calls `getAuthorizationUrl(sessionId)` itself — `index.js` no longer needs to compute or pass the auth URL. Each handler opens with a `isAuthenticated()` check: when the session isn't yet authenticated it returns the shared `loginRequiredContent` payload, so the AI sees a clear message (with the login URL) it can show to the user.
+The factory now **receives** the login URL — `index.js` computes it once (Step 5) and passes it in, keeping the factory free of session bookkeeping. The `withAuth` wrapper guards every tool in one place: when the session isn't yet authenticated it returns a short message containing the login URL for the AI to show the user; otherwise it runs the real handler.
 
 ## Step 5: Per-session providers + callback route
 
-The HTTP entry point from Part 2 used one shared `AppAuthenticationProvider`. Refactor it so each session gets its own `UserAuthenticationProvider` and generated auth URL, and add the `/auth/callback` route that completes the OAuth exchange:
+The HTTP entry point from Part 2 used one shared `AppAuthenticationProvider`. Refactor it so each session gets its own `UserAuthenticationProvider` and login URL, and add the `/auth/callback` route that completes the OAuth exchange:
 
 ```js
 import crypto from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -195,40 +193,55 @@ if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
 }
 const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
 
-const authProviders = new Map();
-const transports = new Map();
+const sessions = new Map();
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());
 
 app.all('/mcp', async (req, res) => {
-    const incomingSessionId = req.headers['mcp-session-id'];
-    let transport = incomingSessionId && transports.get(incomingSessionId);
+    let sessionId = req.headers['mcp-session-id'];
 
     try {
-        if (!transport) {
-            const sessionId = crypto.randomUUID();
-            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, `${PUBLIC_URL}/auth/callback`);
-            const server = createMcpServer(authProvider, sessionId);
-            transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-            authProviders.set(sessionId, authProvider);
-            transports.set(sessionId, transport);
+        if (sessionId && sessions.has(sessionId)) {
+            const { transport } = sessions.get(sessionId);
+            await transport.handleRequest(req, res, req.body);
+        } else if (!sessionId && isInitializeRequest(req.body)) {
+            sessionId = crypto.randomUUID();
+            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, CALLBACK_URL);
+            sessions.set(sessionId, { transport, authProvider });
+            transport.onclose = () => sessions.delete(sessionId);
+            const authUrl = authProvider.getAuthorizationUrl(sessionId);
+            const server = createMcpServer(authProvider, authUrl);
             await server.connect(transport);
+            await transport.handleRequest(req, res, req.body);
+        } else {
+            res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+                id: null,
+            });
         }
-        await transport.handleRequest(req, res, req.body);
     } catch (err) {
         console.error('MCP error:', err);
-        throw new McpError(ErrorCode.InternalError, 'Internal server error');
+        if (!res.headersSent) {
+            res.status(500).json({
+                jsonrpc: '2.0',
+                error: { code: -32603, message: 'Internal server error' },
+                id: null,
+            });
+        }
     }
 });
 
 app.get('/auth/callback', async (req, res) => {
     const { code, state: sessionId } = req.query;
     if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
-    const authProvider = authProviders.get(sessionId);
-    if (!authProvider) return res.status(400).send('Invalid or expired session.');
+    if (!sessions.has(sessionId)) return res.status(400).send('Invalid or expired session ID.');
     try {
+        const { authProvider } = sessions.get(sessionId);
         await authProvider.exchangeAuthCode(code);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {
@@ -242,17 +255,19 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 
 The diff from Part 2:
 
-- A new `authProviders` map mirrors the existing `transports` map.
-- The handler reuses an existing transport when the `mcp-session-id` header matches one; otherwise it constructs a fresh `UserAuthenticationProvider` with the callback URL baked in (`${PUBLIC_URL}/auth/callback`) and calls `createMcpServer(authProvider, sessionId)`. The factory takes the session ID and calls `getAuthorizationUrl(sessionId)` internally — the entry point never holds the auth URL.
-- A single `try/catch` rethrows failures as `McpError(ErrorCode.InternalError, ...)` — Express's default error handler turns that into a 500 with a proper JSON-RPC payload.
-- A new `/auth/callback` route resolves the right provider via the `state` parameter and calls `authProvider.exchangeAuthCode(code)`. No callback URL argument is needed because it was stored at construction time.
+- The single `transports` map becomes a `sessions` map whose entries each bundle a transport with that session's own `UserAuthenticationProvider`.
+- We generate the session ID up front with `crypto.randomUUID()` and feed it to `sessionIdGenerator`. Because the ID is known synchronously we build the provider, derive its login URL with `getAuthorizationUrl(sessionId)`, and register the session immediately — no `onsessioninitialized` callback needed. `transport.onclose` deletes the session.
+- A request whose `mcp-session-id` header matches a stored session is served from that session's transport. A request with no session header is allowed through only if it is an `initialize` request (`isInitializeRequest`); anything else gets a `400` JSON-RPC error.
+- The provider is constructed with the callback URL baked in (`CALLBACK_URL`), and the entry point passes the login URL into the factory via `createMcpServer(authProvider, authUrl)` — the factory itself stays out of session bookkeeping.
+- The `try/catch` replies with a `500` JSON-RPC error (guarded by `res.headersSent`) instead of leaking the exception.
+- A new `/auth/callback` route resolves the right provider from the `sessions` map via the `state` parameter and calls `authProvider.exchangeAuthCode(code)`. No callback URL argument is needed because it was stored at construction time.
 
 ## Checkpoint
 
 You should now have:
 
 - [x] `UserAuthenticationProvider` (with `getAuthorizationUrl` and `exchangeAuthCode` as instance methods) and `getItemTip` in `aps.js`
-- [x] `mcp.js` with `isAuthenticated()` guards in both tool handlers
+- [x] `mcp.js` with a `withAuth` wrapper guarding both tool handlers
 - [x] `index.js` allocating per-session auth providers and serving `/auth/callback`
 
 <details>
@@ -363,28 +378,29 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents } from './aps.js';
 
-export function createMcpServer(authenticationProvider, sessionId) {
+export function createMcpServer(authenticationProvider, authUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
 
-    const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
-    const loginRequiredContent = { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
+    const withAuth = (handler) => async (input) => {
+        if (!authenticationProvider.isAuthenticated()) {
+            return { content: [{ type: 'text', text: `Authentication is required. Please log in at: ${authUrl}` }] };
+        }
+        return await handler(input);
+    };
 
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        async () => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredContent;
-            }
+        withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        }
+        })
     );
 
     server.registerTool(
@@ -397,13 +413,10 @@ export function createMcpServer(authenticationProvider, sessionId) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        async ({ hubId, projectId, folderId }) => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredContent;
-            }
+        withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        }
+        })
     );
 
     return server;
@@ -422,7 +435,7 @@ import crypto from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -433,40 +446,55 @@ if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
 }
 const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
 
-const authProviders = new Map();
-const transports = new Map();
+const sessions = new Map();
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());
 
 app.all('/mcp', async (req, res) => {
-    const incomingSessionId = req.headers['mcp-session-id'];
-    let transport = incomingSessionId && transports.get(incomingSessionId);
+    let sessionId = req.headers['mcp-session-id'];
 
     try {
-        if (!transport) {
-            const sessionId = crypto.randomUUID();
-            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, `${PUBLIC_URL}/auth/callback`);
-            const server = createMcpServer(authProvider, sessionId);
-            transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-            authProviders.set(sessionId, authProvider);
-            transports.set(sessionId, transport);
+        if (sessionId && sessions.has(sessionId)) {
+            const { transport } = sessions.get(sessionId);
+            await transport.handleRequest(req, res, req.body);
+        } else if (!sessionId && isInitializeRequest(req.body)) {
+            sessionId = crypto.randomUUID();
+            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, CALLBACK_URL);
+            sessions.set(sessionId, { transport, authProvider });
+            transport.onclose = () => sessions.delete(sessionId);
+            const authUrl = authProvider.getAuthorizationUrl(sessionId);
+            const server = createMcpServer(authProvider, authUrl);
             await server.connect(transport);
+            await transport.handleRequest(req, res, req.body);
+        } else {
+            res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+                id: null,
+            });
         }
-        await transport.handleRequest(req, res, req.body);
     } catch (err) {
         console.error('MCP error:', err);
-        throw new McpError(ErrorCode.InternalError, 'Internal server error');
+        if (!res.headersSent) {
+            res.status(500).json({
+                jsonrpc: '2.0',
+                error: { code: -32603, message: 'Internal server error' },
+                id: null,
+            });
+        }
     }
 });
 
 app.get('/auth/callback', async (req, res) => {
     const { code, state: sessionId } = req.query;
     if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
-    const authProvider = authProviders.get(sessionId);
-    if (!authProvider) return res.status(400).send('Invalid or expired session.');
+    if (!sessions.has(sessionId)) return res.status(400).send('Invalid or expired session ID.');
     try {
+        const { authProvider } = sessions.get(sessionId);
         await authProvider.exchangeAuthCode(code);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {

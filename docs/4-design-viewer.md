@@ -179,11 +179,35 @@ const VIEWER_DOMAINS = [
 
 The `VIEWER_DOMAINS` list ends up in the resource's Content Security Policy so the embedded viewer can call the APS APIs it depends on.
 
-Add `publicUrl` to the factory signature (needed for the viewer CSP) and register the resource + tool **before** `return server`:
+Add `publicUrl` as a third argument to the factory signature (needed for the viewer CSP) and register the `preview-design` tool plus the viewer resource **before** `return server`:
 
 ```js
-export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
-    // ... existing McpServer, loginRequiredContent (using getAuthorizationUrl(sessionId)), and two registerTool calls ...
+export function createMcpServer(authenticationProvider, authUrl, publicUrl) {
+    // ... existing McpServer, withAuth helper, and two registerTool calls ...
+
+    registerAppTool(server, 'preview-design', {
+        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
+        inputSchema: z.object({
+            projectId: z.string().describe('Project ID the design belongs to.'),
+            designId: z.string().describe('Item ID of the design to preview.'),
+            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
+        }),
+        _meta: {
+            ui: { resourceUri: VIEWER_RESOURCE_URI },
+        },
+    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
+        const accessToken = await authenticationProvider.getAccessToken();
+        const tip = await getItemTip(projectId, designId, authenticationProvider);
+        const config = {
+            accessToken,
+            env: 'AutodeskProduction2',
+            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
+        };
+        return {
+            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
+            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
+        };
+    }));
 
     registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
         contents: [{
@@ -200,33 +224,6 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
         }]
     }));
 
-    registerAppTool(server, 'preview-design', {
-        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
-        inputSchema: z.object({
-            projectId: z.string().describe('Project ID the design belongs to.'),
-            designId: z.string().describe('Item ID of the design to preview.'),
-            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
-        }),
-        _meta: {
-            ui: { resourceUri: VIEWER_RESOURCE_URI },
-        },
-    }, async ({ projectId, designId, region = 'US' }) => {
-        if (!authenticationProvider.isAuthenticated()) {
-            return loginRequiredContent;
-        }
-        const accessToken = await authenticationProvider.getAccessToken();
-        const tip = await getItemTip(projectId, designId, authenticationProvider);
-        const config = {
-            accessToken,
-            env: 'AutodeskProduction2',
-            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
-        };
-        return {
-            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
-            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
-        };
-    });
-
     return server;
 }
 ```
@@ -234,16 +231,16 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
 What's new versus a normal tool:
 
 - `_meta.ui.resourceUri` tells the client which app resource to surface alongside this tool's result.
-- The handler opens with the same `isAuthenticated()` guard used by the other tools, returning `loginRequiredContent` when the session hasn't signed in yet.
+- The handler is wrapped in the same `withAuth` helper used by the other tools, so an unauthenticated session gets the login URL instead of a crash.
 - The handler returns **both** `structuredContent` (consumed by `viewer.js` via `ontoolresult`) and a plain text `content` block (shown to the user / model as a confirmation).
 - The access token is fetched first, then the item tip. The token is short-lived and is included in `structuredContent.config` so the viewer can authenticate its own requests to the derivative service.
 
 ## Step 4: Update the entry point
 
-`index.js` already builds the per-session auth provider. Pass `sessionId` and `PUBLIC_URL` through to the factory so the viewer resource knows which origin to whitelist:
+`index.js` already builds the per-session auth provider and computes its login URL. Pass `PUBLIC_URL` through to the factory as a third argument so the viewer resource knows which origin to whitelist:
 
 ```js
-const server = createMcpServer(authProvider, sessionId, PUBLIC_URL);
+const server = createMcpServer(authProvider, authUrl, PUBLIC_URL);
 ```
 
 That's the only change in `index.js`.
@@ -276,28 +273,29 @@ const VIEWER_DOMAINS = [
     'https://fonts.autodesk.com',
 ];
 
-export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
+export function createMcpServer(authenticationProvider, authUrl, publicUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
 
-    const authUrl = authenticationProvider.getAuthorizationUrl(sessionId);
-    const loginRequiredContent = { content: [{ type: 'text', text: `Authentication required. Please open the following URL in your browser to log in:\n\n${authUrl}\n\nOnce logged in, try again.` }] };
+    const withAuth = (handler) => async (input) => {
+        if (!authenticationProvider.isAuthenticated()) {
+            return { content: [{ type: 'text', text: `Authentication is required. Please log in at: ${authUrl}` }] };
+        }
+        return await handler(input);
+    };
 
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        async () => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredContent;
-            }
+        withAuth(async () => {
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        }
+        })
     );
 
     server.registerTool(
@@ -310,14 +308,35 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        async ({ hubId, projectId, folderId }) => {
-            if (!authenticationProvider.isAuthenticated()) {
-                return loginRequiredContent;
-            }
+        withAuth(async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        }
+        })
     );
+
+    registerAppTool(server, 'preview-design', {
+        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
+        inputSchema: z.object({
+            projectId: z.string().describe('Project ID the design belongs to.'),
+            designId: z.string().describe('Item ID of the design to preview.'),
+            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
+        }),
+        _meta: {
+            ui: { resourceUri: VIEWER_RESOURCE_URI },
+        },
+    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
+        const accessToken = await authenticationProvider.getAccessToken();
+        const tip = await getItemTip(projectId, designId, authenticationProvider);
+        const config = {
+            accessToken,
+            env: 'AutodeskProduction2',
+            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
+        };
+        return {
+            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
+            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
+        };
+    }));
 
     registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
         contents: [{
@@ -333,33 +352,6 @@ export function createMcpServer(authenticationProvider, sessionId, publicUrl) {
             },
         }]
     }));
-
-    registerAppTool(server, 'preview-design', {
-        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
-        inputSchema: z.object({
-            projectId: z.string().describe('Project ID the design belongs to.'),
-            designId: z.string().describe('Item ID of the design to preview.'),
-            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
-        }),
-        _meta: {
-            ui: { resourceUri: VIEWER_RESOURCE_URI },
-        },
-    }, async ({ projectId, designId, region = 'US' }) => {
-        if (!authenticationProvider.isAuthenticated()) {
-            return loginRequiredContent;
-        }
-        const accessToken = await authenticationProvider.getAccessToken();
-        const tip = await getItemTip(projectId, designId, authenticationProvider);
-        const config = {
-            accessToken,
-            env: 'AutodeskProduction2',
-            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
-        };
-        return {
-            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
-            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
-        };
-    });
 
     return server;
 }
@@ -377,7 +369,7 @@ import crypto from 'crypto';
 import cors from 'cors';
 import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -388,40 +380,55 @@ if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
 }
 const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
 
-const authProviders = new Map();
-const transports = new Map();
+const sessions = new Map();
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());
 
 app.all('/mcp', async (req, res) => {
-    const incomingSessionId = req.headers['mcp-session-id'];
-    let transport = incomingSessionId && transports.get(incomingSessionId);
+    let sessionId = req.headers['mcp-session-id'];
 
     try {
-        if (!transport) {
-            const sessionId = crypto.randomUUID();
-            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, `${PUBLIC_URL}/auth/callback`);
-            const server = createMcpServer(authProvider, sessionId, PUBLIC_URL);
-            transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-            authProviders.set(sessionId, authProvider);
-            transports.set(sessionId, transport);
+        if (sessionId && sessions.has(sessionId)) {
+            const { transport } = sessions.get(sessionId);
+            await transport.handleRequest(req, res, req.body);
+        } else if (!sessionId && isInitializeRequest(req.body)) {
+            sessionId = crypto.randomUUID();
+            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
+            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, CALLBACK_URL);
+            sessions.set(sessionId, { transport, authProvider });
+            transport.onclose = () => sessions.delete(sessionId);
+            const authUrl = authProvider.getAuthorizationUrl(sessionId);
+            const server = createMcpServer(authProvider, authUrl, PUBLIC_URL);
             await server.connect(transport);
+            await transport.handleRequest(req, res, req.body);
+        } else {
+            res.status(400).json({
+                jsonrpc: '2.0',
+                error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
+                id: null,
+            });
         }
-        await transport.handleRequest(req, res, req.body);
     } catch (err) {
         console.error('MCP error:', err);
-        throw new McpError(ErrorCode.InternalError, 'Internal server error');
+        if (!res.headersSent) {
+            res.status(500).json({
+                jsonrpc: '2.0',
+                error: { code: -32603, message: 'Internal server error' },
+                id: null,
+            });
+        }
     }
 });
 
 app.get('/auth/callback', async (req, res) => {
     const { code, state: sessionId } = req.query;
     if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
-    const authProvider = authProviders.get(sessionId);
-    if (!authProvider) return res.status(400).send('Invalid or expired session.');
+    if (!sessions.has(sessionId)) return res.status(400).send('Invalid or expired session ID.');
     try {
+        const { authProvider } = sessions.get(sessionId);
         await authProvider.exchangeAuthCode(code);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {
