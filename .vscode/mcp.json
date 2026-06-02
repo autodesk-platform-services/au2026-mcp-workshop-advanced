@@ -1,9 +1,8 @@
 {
-	"servers": {
-		"local-workshop-server": {
-			"url": "http://localhost:3000/mcp",
-			"type": "http"
-		}
-	},
-	"inputs": []
+  "servers": {
+    "APS MCP Server (Advanced)": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
+    }
+  }
 }

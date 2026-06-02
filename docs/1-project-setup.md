@@ -2,12 +2,12 @@
 
 In this section you'll prepare a fresh project (or branch of the beginner project) with the dependencies the advanced session needs: an HTTP server (Express + CORS), the MCP **ext-apps** package that powers embedded UI resources, and Vite to bundle the viewer HTML into a single file.
 
-## Step 1: Repository
+## Step 1: Starting point
 
-You have two options:
+The advanced session builds directly on the beginner MCP server. You have two ways to get that starting code:
 
-- **Branch the beginner project.** Create a new branch (e.g. `advanced`) on your existing `au2026-mcp-workshop-beginner` repository. All the beginner code stays intact and you evolve it in place.
-- **Fresh repository.** Create a new public repo named `au2026-mcp-workshop-advanced`, copy across `aps.js`, `mcp.js`, and `index.js` from the beginner project, then continue here.
+- **Reuse your beginner project.** If you completed the beginner session, carry on with the MCP server you built. Branch your existing `au2026-mcp-workshop-beginner` repository (e.g. an `advanced` branch). All your beginner code stays intact and you evolve it in place.
+- **Clone the reference implementation.** If you didn't finish the beginner session, start from the finished beginner code at [github.com/autodesk-platform-services/au2026-mcp-workshop-beginner](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner). Clone it, then continue here.
 
 Either way, add the same two Codespace secrets (or local environment variables) as in the beginner session:
 
