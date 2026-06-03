@@ -1,8 +1,12 @@
 # Extras
 
-## Vibe-Code Additional Features
+## Spec-Driven Development with GitHub Spec-Kit
 
-Now that the server runs over HTTP, authenticates real users, and renders 3D, there are plenty of directions to take it. Some ideas:
+The advanced server has three moving parts — HTTP transport, per-session OAuth, and the embedded viewer UI — and a change in one layer can quietly break the other two. The beginner workshop walked you through ad-hoc "vibe coding" with Copilot. For features at this scale it pays to slow down: write a specification first, plan the implementation, then let Copilot execute against an explicit checklist.
+
+[GitHub Spec-Kit](https://github.com/github/spec-kit) is a small toolkit that does exactly that. It installs a set of slash commands into Copilot (and other agents) that walk you through a spec-driven workflow.
+
+Some features worth tackling this way:
 
 - **Issues tool.** Add a tool that lists open issues on a project using the [ACC Issues API](https://aps.autodesk.com/en/docs/acc/v1/overview/field-guide/issues/). Use the selection event from the viewer to filter issues by element.
 - **Multi-model preview.** Extend `preview-design` to accept an array of designs and aggregate them in a single viewer scene with `loadDocumentNode` per model.
@@ -10,11 +14,23 @@ Now that the server runs over HTTP, authenticates real users, and renders 3D, th
 - **Smarter viewer context.** When the user selects an element, look it up via the Model Derivative properties API and feed a richer description back through `updateModelContext`.
 - **Public deployment.** Put the server behind a stable hostname and update the APS app's Callback URL. Containerise it so Vite builds at image-build time and the runtime doesn't need a `dist/` checkout.
 
-### Suggested approach
+### Suggested workflow
 
-1. Describe the feature in plain language to Copilot — your own server is available as a tool, so the model can explore APIs alongside you.
-2. Let Copilot draft the change, then review the diff carefully (HTTP servers and OAuth flows are easier to break than they look).
-3. Test end-to-end via Copilot Chat *and* `npx @modelcontextprotocol/inspector http://localhost:3000/mcp` to isolate transport vs. tool issues.
+1. Install Spec-Kit into your repo. From the project root in your Codespace, run:
+
+   ```bash
+   uvx --from git+https://github.com/github/spec-kit.git specify init --here --ai copilot
+   ```
+
+   This drops a `.specify/` folder and a set of slash commands into your Copilot configuration. Swap `copilot` for `claude`, `gemini`, etc., if you prefer a different agent.
+
+2. **`/constitution`** — capture the invariants this server already enforces (thin `index.js`, tokens never leave `UserAuthenticationProvider`, `aps.js` doesn't import from `mcp.js`, `PUBLIC_URL` matches the APS Callback URL). Copilot will reference these on every later step.
+3. **`/specify`** — describe the feature in plain language. Focus on *what* and *why*, not *how*. Example: "List open issues on a project, filterable by the element currently selected in the viewer."
+4. **`/plan`** — let Copilot draft a technical plan: which files change, which APS endpoint it calls, how the result is surfaced through MCP and the viewer UI. Review the plan carefully — HTTP servers and OAuth flows are easier to break than they look.
+5. **`/tasks`** — break the plan into discrete, reviewable steps.
+6. **`/implement`** — Copilot works through the task list. Test end-to-end via Copilot Chat *and* `npx @modelcontextprotocol/inspector http://localhost:3000/mcp` to isolate transport vs. tool issues.
+
+> **Why spec-first here?** The advanced server crosses three trust boundaries (the MCP client, your Express app, and APS). A short written spec catches scope creep and missing authorisation checks before they land in `index.js` — the file that should stay thin.
 
 ## Production checklist
 
