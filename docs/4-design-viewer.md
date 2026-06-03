@@ -150,13 +150,15 @@ What this does:
 2. The custom `emit-viewer-module` plugin reads that final HTML, JSON-stringifies it, and writes it to `dist/viewer.js` as `export default "...";`.
 3. The MCP server then imports `dist/viewer.js` and serves the string as the resource body — no need to add static-file routes to Express.
 
-Build it now:
+Build it now — and remember to re-run this command whenever you change anything under `ui/`:
 
 ```bash
 npm run build
 ```
 
 You should see `dist/viewer.html` and `dist/viewer.js` appear.
+
+> **Required before `npm start`.** The server's `mcp.js` imports `./dist/viewer.js` at startup. If you skip the build (or pull a fresh clone and run `npm start` straight away), Node will throw `Cannot find module './dist/viewer.js'`. Always run `npm run build` at least once before starting the server.
 
 ## Step 3: Register the resource and tool
 
@@ -237,10 +239,11 @@ What's new versus a normal tool:
 
 ## Step 4: Update the entry point
 
-`index.js` already builds the per-session auth provider and computes its login URL. Pass `PUBLIC_URL` through to the factory as a third argument so the viewer resource knows which origin to whitelist:
+`index.js` already builds the per-session auth provider and computes its login URL. Add `PUBLIC_URL` as a third argument to the `createMcpServer` call so the viewer resource knows which origin to whitelist:
 
-```js
-const server = createMcpServer(authProvider, authUrl, PUBLIC_URL);
+```diff
+- const server = createMcpServer(authProvider, authUrl);
++ const server = createMcpServer(authProvider, authUrl, PUBLIC_URL);
 ```
 
 That's the only change in `index.js`.
@@ -488,6 +491,10 @@ export default defineConfig({
 4. After `preview-design` runs, the viewer panel appears with the model loaded. Select an object — the chat now knows what's selected and can answer follow-up questions about it.
 
 > **Cache busting.** If you rebuild the viewer while a Copilot session is open, restart the MCP server so the new `dist/viewer.js` is imported and the next session loads the fresh resource.
+
+### Where next?
+
+You've now got an HTTP MCP server with per-user OAuth and an embedded 3D viewer — the same building blocks production APS integrations use. The [Extras](extras.md) page covers spec-driven development with GitHub Spec-Kit (recommended once changes start touching multiple layers at once) and a production checklist for shipping this server as a real service.
 
 ### Additional resources
 

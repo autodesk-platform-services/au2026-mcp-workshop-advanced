@@ -171,9 +171,23 @@ You should now have:
 3. Ask: *"What Forma projects do I have access to?"*
 4. Copilot calls `list-hubs-projects` and returns the hubs visible to your APS *application* (the same data you saw in the beginner workshop, since the auth model hasn't changed yet).
 
-> **Tip:** `npx @modelcontextprotocol/inspector http://localhost:3000/mcp` is the fastest way to debug the HTTP transport without going through Copilot. It shows the JSON-RPC traffic, including the `mcp-session-id` header negotiation.
-
 The output is still scoped to the app, not a user — exactly what Part 3 will change.
+
+> **Debugging tip — MCP Inspector.** When the HTTP transport doesn't behave, bypass Copilot and connect the MCP Inspector to the running server:
+>
+> ```bash
+> npx @modelcontextprotocol/inspector http://localhost:3000/mcp
+> ```
+>
+> The command starts the Inspector's web UI on port **6274** inside your Codespace. Because the Codespace is a remote environment, the web UI is **not** automatically available in your local browser — you need to forward the port:
+>
+> 1. Open the **Ports** panel in VS Code (bottom panel → **Ports** tab).
+> 2. Look for port `6274` — VS Code usually detects and adds it automatically when the Inspector starts.
+> 3. Hover over the **Forwarded Address** column and click the globe icon to open it in your browser.
+>
+> The Inspector shows the JSON-RPC traffic (including the `mcp-session-id` header negotiation), lets you invoke tools manually, and is the fastest way to isolate transport bugs from tool bugs.
+>
+> Note that this command connects to your already-running server at `localhost:3000` — **start the server first** with `npm start`, then run the Inspector command in a second terminal.
 
 ### Additional resources
 

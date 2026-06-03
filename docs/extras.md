@@ -32,6 +32,68 @@ Some features worth tackling this way:
 
 > **Why spec-first here?** The advanced server crosses three trust boundaries (the MCP client, your Express app, and APS). A short written spec catches scope creep and missing authorisation checks before they land in `index.js` — the file that should stay thin.
 
+### Example: an issues tool, spec-first
+
+Below is the kind of input each slash command expects. Don't copy these verbatim — they're a shape to imitate when you write your own.
+
+**`/constitution`** — invariants this codebase already enforces:
+
+```text
+- index.js stays thin: it only wires Express, the MCP transport, and the auth
+  provider. New features go in aps.js (APS calls), mcp.js (tool registration),
+  or web/ (viewer UI).
+- Access tokens never leave UserAuthenticationProvider. Tools receive a
+  per-session token via the provider, never via globals or request bodies.
+- aps.js must not import from mcp.js. APS client code stays transport-agnostic
+  so it can be reused outside MCP.
+- PUBLIC_URL must match the APS app's Callback URL exactly, including scheme
+  and port. Any new redirect-bearing flow goes through the same value.
+- The viewer (web/) only talks to the server over the existing MCP session;
+  it never holds an APS access token directly.
+```
+
+**`/specify`** — feature description (the *what* and *why*, not the *how*):
+
+```text
+Add a tool that lists open issues on an ACC project so the user can triage
+them from Copilot Chat without leaving the viewer.
+
+User stories:
+- As a project admin, I can ask "what issues are open on project X?" and get
+  a list of titles, statuses, and assignees.
+- As a reviewer with an element selected in the embedded viewer, I can ask
+  "any issues on this?" and get only issues linked to that element.
+
+Out of scope: creating, updating, or closing issues; comments; attachments.
+
+Success criteria:
+- Returns at most 50 issues, newest first.
+- Filters by the viewer's current selection when one is present in the
+  session context.
+- Surfaces a clear error (not a stack trace) when the user lacks access to
+  the project.
+```
+
+**`/plan`** — what Copilot should draft, and what to look for when you review it:
+
+```text
+Expected touch points:
+- aps.js: new listOpenIssues(projectId, { elementUrn? }) wrapping
+  GET /construction/issues/v1/projects/{projectId}/issues. Pagination handled
+  internally; returns at most 50.
+- mcp.js: register `list-issues` tool taking { projectId, useSelection? }.
+  When useSelection is true, read the current selection from the session's
+  model context (set by updateModelContext) and pass it as elementUrn.
+- No changes to index.js. No changes to web/ in this iteration.
+
+Review checklist before /tasks:
+- Token still comes from UserAuthenticationProvider, not a parameter.
+- 403/404 from APS map to a user-readable MCP error, not a thrown Error.
+- The selection lookup degrades gracefully when no model context exists.
+```
+
+`/tasks` then expands the plan into reviewable steps, and `/implement` executes them one at a time so you can catch regressions in HTTP transport or the auth flow before they compound.
+
 ## Production checklist
 
 The advanced server is much closer to a real product than the beginner's STDIO build, but it still has rough edges. Address these before shipping:

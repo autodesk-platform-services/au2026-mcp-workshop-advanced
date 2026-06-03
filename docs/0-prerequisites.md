@@ -30,7 +30,7 @@ You need an APS application with a **Callback URL** configured — without it, t
 
 ## Access to Forma
 
-Same as the beginner session: an administrator must add your APS application to a Forma hub under **Hub Admin → Custom Integrations**. The 3-legged flow uses *the signed-in user's* permissions, so you also need to be a member of at least one project in that hub.
+Same as the beginner session: an administrator must add your APS application to a Forma hub under **Hub Admin → Custom Integrations**. The 3-legged flow uses *the signed-in user's* permissions, so you also need to be **a member of at least one project in that hub** — otherwise the tools in Part 3 will return an empty list even though the code is working correctly.
 
 ## GitHub, Codespaces, Copilot
 
@@ -46,6 +46,7 @@ You're ready when:
 
 - [x] Your APS app has a Callback URL ending in `/auth/callback`
 - [x] You have the beginner workshop code (or are happy to retype the small pieces it provides)
+- [x] You are a member of at least one project in the Forma hub your APS app is provisioned to
 - [x] You can open VS Code with Copilot in agent mode
 
 The workshop instructor will do a quick setup check at the start of the session.

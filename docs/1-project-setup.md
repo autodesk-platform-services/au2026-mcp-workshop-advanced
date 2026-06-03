@@ -6,8 +6,8 @@ In this section you'll prepare a fresh project (or branch of the beginner projec
 
 The advanced session builds directly on the beginner MCP server. You have two ways to get that starting code:
 
-- **Reuse your beginner project.** If you completed the beginner session, carry on with the MCP server you built. Branch your existing `au2026-mcp-workshop-beginner` repository (e.g. an `advanced` branch). All your beginner code stays intact and you evolve it in place.
-- **Clone the reference implementation.** If you didn't finish the beginner session, start from the finished beginner code at [github.com/autodesk-platform-services/au2026-mcp-workshop-beginner](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner). Clone it, then continue here.
+- **Reuse your beginner project**, *as long as you completed every step of the beginner session.* If your beginner repo already has the finished `aps.js`, `mcp.js`, `index.js`, and `.vscode/mcp.json` from the end of Part 3 of the beginner session, branch it (e.g. an `advanced` branch) and evolve it in place.
+- **Clone the reference implementation.** If you didn't finish the beginner session — or only got partway through — start from the finished beginner code at [github.com/autodesk-platform-services/au2026-mcp-workshop-beginner](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner). Clone it, then continue here.
 
 Either way, add the same two Codespace secrets (or local environment variables) as in the beginner session:
 
@@ -20,7 +20,10 @@ Either way, add the same two Codespace secrets (or local environment variables) 
 
 Start a Codespace as in the beginner session, or work locally with Node.js 20+ if you prefer. Open the project in VS Code so Copilot can talk to your server later.
 
-> **Port forwarding.** When you start the server in Part 3 it will listen on port `3000`. In a Codespace, make sure that port is forwarded and its visibility lets the browser callback through (private is fine as long as you complete the OAuth flow in the same browser session).
+> **Port forwarding (read this if you're using a Codespace).** When you start the server in Part 2 it listens on port `3000`, and the OAuth callback in Part 3 needs to be reachable *from your local browser*. Since the browser runs on your laptop and the server runs in the Codespace, `http://localhost:3000/auth/callback` only works if the Codespace forwards port `3000` back to your machine — which it does by default once the server is running. You have two options:
+>
+> - **Easiest:** keep the default `localhost:3000` callback. In the Codespace **Ports** panel, set port `3000` visibility to **Public** (or **Private** if you'll complete OAuth in the same browser that's signed into the Codespace).
+> - **Public hostname:** use the forwarded URL the Codespace assigns (e.g. `https://<codespace>-3000.app.github.dev`). Register `https://<codespace>-3000.app.github.dev/auth/callback` as an additional Callback URL in your APS app, and set `PUBLIC_URL` to `https://<codespace>-3000.app.github.dev` when you start the server in Part 3.
 
 ## Step 3: Dependencies
 
