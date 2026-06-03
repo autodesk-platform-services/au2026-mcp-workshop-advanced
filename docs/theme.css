@@ -59,59 +59,53 @@
     --theme-color: #ffff00;
 
     /* Background Colors */
-    --base-background-color: #0a0a0a;
+    --base-background-color: #ffffff;
     --sidebar-background: #000000;
     --cover-background-color: #000000;
 
-    /* Text Colors */
-    --base-color: #e8e8e8;
-    --heading-color: #ffffff;
+    /* Text Colors — Autodesk Black for body and headings */
+    --base-color: #000000;
+    --heading-color: #000000;
     --sidebar-name-color: #ffff00;
     --sidebar-nav-link-color--active: #ffff00;
     --sidebar-nav-link-color--hover: #ffffff;
     --sidebar-nav-link-color: #cccccc;
 
-    /* Link Colors */
-    --link-color: #a0a0a0;
-    --link-color--hover: #ffffff;
+    /* Link Colors — Autodesk Twilight */
+    --link-color: #1d91d0;
+    --link-color--hover: #136b9a;
     --link-text-decoration--hover: underline;
 
-    /* Blockquote */
-    --blockquote-background: #1a1a00;
-    --blockquote-border-color: #ffff00;
-    --blockquote-color: #e8e8e8;
+    /* Blockquote — Twilight 100 wash with Twilight accent */
+    --blockquote-background: #bfe4f7;
+    --blockquote-border-color: #1d91d0;
+    --blockquote-color: #000000;
 
-    /* Horizontal Rule */
-    --hr-border: 1px solid #333333;
+    /* Horizontal Rule — Warm Slate */
+    --hr-border: 1px solid #d5d5cb;
 
-    /* Table */
-    --table-cell-border-color: #333333;
-    --table-head-background: #111111;
-    --table-head-color: #ffffff;
-    --table-row-odd-background: #111111;
-    --table-row-even-background: #0a0a0a;
+    /* Table — Warm Slate borders and header */
+    --table-cell-border-color: #d5d5cb;
+    --table-head-background: #d5d5cb;
+    --table-head-color: #000000;
+    --table-row-odd-background: #f5f5f5;
+    --table-row-even-background: #ffffff;
 
     /* Code Colors */
-    --code-theme-background: #111111;
-    --code-theme-text: #e8e8e8;
-    --code-inline-background: #1a1a1a;
-    --code-inline-color: #ffffff;
+    --code-theme-background: #f5f5f5;
+    --code-theme-text: #000000;
+    --code-inline-background: #f0f0f0;
+    --code-inline-color: #000000;
     --code-block-border-radius: 4px;
 
-    /* Notices / Callouts */
-    --notice-tip-background: #1a1a00;
-    --notice-tip-border-color: #ffff00;
+    /* Notices / Callouts — Twilight 100 wash with Twilight accent */
+    --notice-tip-background: #bfe4f7;
+    --notice-tip-border-color: #1d91d0;
 
     /* Font Settings */
     --base-font-family: 'ArtifaktElement';
     --sidebar-width: 20rem;
     --sidebar-name-font-weight: 700;
-}
-
-/* H1 and H2 use the AU brand yellow */
-.markdown-section h1,
-.markdown-section h2 {
-    color: #ffff00;
 }
 
 /* Sidebar toggle button */
@@ -139,12 +133,12 @@
     color: #000000 !important;
 }
 
-/* Pagination links */
+/* Pagination links — Autodesk Slate */
 .pagination-item a {
-    color: #cccccc;
+    color: #666666;
 }
 .pagination-item a:hover {
-    color: #ffffff;
+    color: #000000;
 }
 
 /* Selection highlight */
