@@ -55,52 +55,62 @@
 }
 
 :root {
-    /* Accent/Theme Colors — AU 2026 brand yellow */
+    /* Autodesk palette */
+    --adsk-black: #000000;
+    --adsk-white: #ffffff;
+    --adsk-hello-yellow: #ffff00;
+    --adsk-warm-slate: #d5d5cb;
+    --adsk-slate: #666666;
+    --adsk-twilight: #1d91d0;
+    --adsk-twilight-hover: #136b9a;
+    --adsk-twilight-wash: #bfe4f7;
+
+    /* Accent/Theme Colors */
     --theme-color: #ffff00;
 
     /* Background Colors */
-    --base-background-color: #ffffff;
-    --sidebar-background: #000000;
-    --cover-background-color: #000000;
+    --base-background-color: var(--adsk-white);
+    --sidebar-background: var(--adsk-black);
+    --cover-background-color: var(--adsk-black);
 
-    /* Text Colors — Autodesk Black for body and headings */
-    --base-color: #000000;
-    --heading-color: #000000;
-    --sidebar-name-color: #ffff00;
-    --sidebar-nav-link-color--active: #ffff00;
-    --sidebar-nav-link-color--hover: #ffffff;
-    --sidebar-nav-link-color: #cccccc;
+    /* Text Colors */
+    --base-color: var(--adsk-black);
+    --heading-color: var(--adsk-black);
+    --sidebar-name-color: var(--adsk-hello-yellow);
+    --sidebar-nav-link-color--active: var(--adsk-hello-yellow);
+    --sidebar-nav-link-color--hover: var(--adsk-white);
+    --sidebar-nav-link-color: var(--adsk-warm-slate);
 
     /* Link Colors — Autodesk Twilight */
-    --link-color: #1d91d0;
-    --link-color--hover: #136b9a;
+    --link-color: var(--adsk-twilight);
+    --link-color--hover: var(--adsk-twilight-hover);
     --link-text-decoration--hover: underline;
 
-    /* Blockquote — Twilight 100 wash with Twilight accent */
-    --blockquote-background: #bfe4f7;
-    --blockquote-border-color: #1d91d0;
-    --blockquote-color: #000000;
+    /* Blockquote */
+    --blockquote-background: var(--adsk-twilight-wash);
+    --blockquote-border-color: var(--adsk-twilight);
+    --blockquote-color: var(--adsk-black);
 
     /* Horizontal Rule — Warm Slate */
-    --hr-border: 1px solid #d5d5cb;
+    --hr-border: 1px solid var(--adsk-warm-slate);
 
     /* Table — Warm Slate borders and header */
-    --table-cell-border-color: #d5d5cb;
-    --table-head-background: #d5d5cb;
-    --table-head-color: #000000;
-    --table-row-odd-background: #f5f5f5;
-    --table-row-even-background: #ffffff;
+    --table-cell-border-color: var(--adsk-warm-slate);
+    --table-head-background: var(--adsk-warm-slate);
+    --table-head-color: var(--adsk-black);
+    --table-row-odd-background: var(--adsk-white);
+    --table-row-even-background: var(--adsk-white);
 
     /* Code Colors */
-    --code-theme-background: #f5f5f5;
-    --code-theme-text: #000000;
-    --code-inline-background: #f0f0f0;
-    --code-inline-color: #000000;
+    --code-theme-background: var(--adsk-white);
+    --code-theme-text: var(--adsk-black);
+    --code-inline-background: var(--adsk-white);
+    --code-inline-color: var(--adsk-black);
     --code-block-border-radius: 4px;
 
-    /* Notices / Callouts — Twilight 100 wash with Twilight accent */
-    --notice-tip-background: #bfe4f7;
-    --notice-tip-border-color: #1d91d0;
+    /* Notices / Callouts */
+    --notice-tip-background: var(--adsk-twilight-wash);
+    --notice-tip-border-color: var(--adsk-twilight);
 
     /* Font Settings */
     --base-font-family: 'ArtifaktElement';
@@ -108,41 +118,122 @@
     --sidebar-name-font-weight: 700;
 }
 
+body {
+    background: var(--adsk-white);
+    color: var(--adsk-black);
+    text-rendering: optimizeLegibility;
+}
+
+.sidebar {
+    border-right: 1px solid var(--adsk-slate);
+}
+
+.sidebar ul li > a,
+.sidebar ul li > a:hover,
+.sidebar ul li > a:focus {
+    border-left: 2px solid transparent;
+    padding-left: 0.75rem;
+    margin-left: 0;
+}
+
+.sidebar ul li.active > a,
+.sidebar ul li.active > a:hover,
+.sidebar ul li.active > a:focus {
+    border-left-color: transparent;
+    border-left-width: 2px;
+    padding-left: 0.75rem;
+    margin-left: 0;
+    transform: none;
+}
+
+.markdown-section {
+    max-width: 54rem;
+    padding-top: 2rem;
+    padding-bottom: 3rem;
+}
+
+.markdown-section h1,
+.markdown-section h2,
+.markdown-section h3 {
+    letter-spacing: 0.01em;
+    line-height: 1.2;
+}
+
+.markdown-section h2 {
+    border-bottom: 1px solid var(--adsk-warm-slate);
+    padding-bottom: 0.35rem;
+}
+
+.markdown-section blockquote {
+    border-left-width: 4px;
+}
+
+.markdown-section table th,
+.markdown-section table td {
+    padding: 0.5rem 0.625rem;
+}
+
+.markdown-section pre {
+    border: 1px solid var(--adsk-warm-slate);
+}
+
+.markdown-section code {
+    border: 1px solid var(--adsk-warm-slate);
+    border-radius: 4px;
+}
+
+@media (max-width: 960px) {
+    :root {
+        --sidebar-width: 18rem;
+    }
+
+    .markdown-section {
+        padding-top: 1.5rem;
+        padding-bottom: 2rem;
+    }
+}
+
 /* Sidebar toggle button */
 .sidebar-toggle {
-    background-color: #000000;
-    --sidebar-toggle-background: #000000;
-    --sidebar-toggle-icon-color: #ffffff;
+    background-color: var(--adsk-black);
+    --sidebar-toggle-background: var(--adsk-black);
+    --sidebar-toggle-icon-color: var(--adsk-white);
 }
 .sidebar-toggle span {
-    background-color: #ffffff;
+    background-color: var(--adsk-white);
 }
 
 /* Progress bar */
 .progress-bar {
-    background-color: #ffff00;
+    background-color: var(--adsk-hello-yellow);
 }
 
 /* Copy-code button */
 .docsify-copy-code-button {
-    background: #333333 !important;
-    color: #cccccc !important;
+    background: var(--adsk-slate) !important;
+    color: var(--adsk-white) !important;
 }
 .docsify-copy-code-button:hover {
-    background: #ffff00 !important;
-    color: #000000 !important;
+    background: var(--adsk-hello-yellow) !important;
+    color: var(--adsk-black) !important;
 }
 
 /* Pagination links — Autodesk Slate */
 .pagination-item a {
-    color: #666666;
+    color: var(--adsk-slate);
 }
 .pagination-item a:hover {
-    color: #000000;
+    color: var(--adsk-black);
+}
+
+/* Top-right GitHub corner */
+.github-corner svg {
+    fill: var(--adsk-slate);
+    color: var(--adsk-white);
 }
 
 /* Selection highlight */
 ::selection {
-    background: #ffff00;
-    color: #000000;
+    background: var(--adsk-hello-yellow);
+    color: var(--adsk-black);
 }
