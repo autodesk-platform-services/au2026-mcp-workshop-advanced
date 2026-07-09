@@ -1,19 +1,13 @@
 {
   "name": "au2026-mcp-workshop-advanced",
   "version": "1.0.0",
-  "description": "APS MCP Workshop — Advanced Session (AU2026)",
+  "description": "APS MCP Workshop — Advanced Session (AU2026) — viewer UI build",
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "start": "node index.js"
+    "build": "vite build"
   },
   "dependencies": {
-    "@aps_sdk/authentication": "^1.0.0",
-    "@aps_sdk/data-management": "^1.1.0",
-    "@modelcontextprotocol/ext-apps": "^1.7.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "cors": "^2.8.6",
-    "zod": "^4.4.0"
+    "@modelcontextprotocol/ext-apps": "^1.7.0"
   },
   "devDependencies": {
     "vite": "^8.0.14",

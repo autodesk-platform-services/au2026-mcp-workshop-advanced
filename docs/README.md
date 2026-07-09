@@ -6,11 +6,11 @@ Welcome to the advanced session of the **Autodesk Platform Services MCP Workshop
 
 You'll evolve the MCP server from the [beginner workshop](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner) into a deployable, multi-user service with an embedded 3D viewer:
 
-- Replace the local **STDIO** transport with **Streamable HTTP** over Express, with one MCP transport per session.
+- Replace the local **STDIO** transport with **Streamable HTTP** over Starlette, with one MCP transport per session.
 - Swap **2-legged** app authentication for **3-legged** user OAuth so each session acts as a real Autodesk user, complete with an `/auth/callback` route.
 - Add a new `preview-design` tool that returns an embedded **APS Viewer** UI resource, letting the AI render 3D models directly in the chat.
 
-> **Prerequisite:** You should have completed the beginner workshop, or be comfortable with the codebase it produced (`aps.js`, `mcp.js`, `index.js` with the two read-only tools).
+> **Prerequisite:** You should have completed the beginner workshop, or be comfortable with the codebase it produced (`aps.py`, `server.py`, `main.py` with the two read-only tools).
 
 ## Sessions
 

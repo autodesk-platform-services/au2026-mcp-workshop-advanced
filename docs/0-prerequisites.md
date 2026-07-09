@@ -7,7 +7,7 @@ Complete these steps **before the workshop**. They take roughly 20–30 minutes,
 This session continues from the [AU2026 MCP Workshop: Beginner](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner). You don't need to have finished it live, but you should have:
 
 - A working clone of the beginner repository, **or**
-- Familiarity with the code it produces: `aps.js` (2-legged `AppAuthenticationProvider`, `getHubsProjects`, `getFolderContents`), `mcp.js` (factory with two tools), and a STDIO-based `index.js`.
+- Familiarity with the code it produces: `aps.py` (2-legged `AppAuthenticationProvider`, `get_hubs_projects`, `get_folder_contents`), `server.py` (factory with two tools), and a STDIO-based `main.py`.
 
 The advanced workshop replaces parts of those files. You'll see the original snippets in each section so you can follow along even if you start fresh.
 

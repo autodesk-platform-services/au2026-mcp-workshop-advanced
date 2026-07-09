@@ -1,12 +1,12 @@
 # Part 1: Project Setup
 
-In this section you'll prepare a fresh project (or branch of the beginner project) with the dependencies the advanced session needs: an HTTP server (Express + CORS), the MCP **ext-apps** package that powers embedded UI resources, and Vite to bundle the viewer HTML into a single file.
+In this section you'll prepare a fresh project (or branch of the beginner project) with the two toolchains the advanced session needs: Python for the MCP server itself (Starlette + uvicorn for the HTTP transport), and Node.js purely to bundle the viewer UI with Vite. The server never runs any JavaScript — Node only produces a static HTML file that the Python server reads.
 
 ## Step 1: Starting point
 
 The advanced session builds directly on the beginner MCP server. You have two ways to get that starting code:
 
-- **Reuse your beginner project**, *as long as you completed every step of the beginner session.* If your beginner repo already has the finished `aps.js`, `mcp.js`, `index.js`, and `.vscode/mcp.json` from the end of Part 3 of the beginner session, branch it (e.g. an `advanced` branch) and evolve it in place.
+- **Reuse your beginner project**, *as long as you completed every step of the beginner session.* If your beginner repo already has the finished `aps.py`, `server.py`, `main.py`, and `.vscode/mcp.json` from the end of Part 3 of the beginner session, branch it (e.g. an `advanced` branch) and evolve it in place.
 - **Clone the reference implementation.** If you didn't finish the beginner session — or only got partway through — start from the finished beginner code at [github.com/autodesk-platform-services/au2026-mcp-workshop-beginner](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner). Clone it, then continue here.
 
 Either way, add the same two Codespace secrets (or local environment variables) as in the beginner session:
@@ -18,34 +18,54 @@ Either way, add the same two Codespace secrets (or local environment variables) 
 
 ## Step 2: Codespace (or local)
 
-Start a Codespace as in the beginner session, or work locally with Node.js 20+ if you prefer. Open the project in VS Code so Copilot can talk to your server later.
+Start a Codespace as in the beginner session, or work locally with Python 3.10+ **and** Node.js 20+ if you prefer. Open the project in VS Code so Copilot can talk to your server later.
 
 > **Port forwarding (read this if you're using a Codespace).** When you start the server in Part 2 it listens on port `3000`, and the OAuth callback in Part 3 needs to be reachable *from your local browser*. Since the browser runs on your laptop and the server runs in the Codespace, `http://localhost:3000/auth/callback` only works if the Codespace forwards port `3000` back to your machine — which it does by default once the server is running. You have two options:
 >
 > - **Easiest:** keep the default `localhost:3000` callback. In the Codespace **Ports** panel, set port `3000` visibility to **Public** (or **Private** if you'll complete OAuth in the same browser that's signed into the Codespace).
 > - **Public hostname:** use the forwarded URL the Codespace assigns (e.g. `https://<codespace>-3000.app.github.dev`). Register `https://<codespace>-3000.app.github.dev/auth/callback` as an additional Callback URL in your APS app, and set `PUBLIC_URL` to `https://<codespace>-3000.app.github.dev` when you start the server in Part 3.
 
-## Step 3: Dependencies
+## Step 3: Python dependencies
 
-Replace your `package.json` with the advanced version:
+Replace your `requirements.txt` with the advanced version:
+
+```text
+mcp>=1.28.0,<2.0.0
+requests>=2.31.0,<3.0.0
+starlette>=1.0.0,<2.0.0
+uvicorn>=0.34.0,<1.0.0
+```
+
+What's new compared to the beginner session:
+
+| Dependency | Why |
+| --- | --- |
+| `starlette` | The ASGI framework behind the Streamable HTTP transport — the Python equivalent of Express |
+| `uvicorn` | The ASGI server that actually runs Starlette and listens on a port |
+
+Install everything:
+
+```bash
+pip install -r requirements.txt
+```
+
+## Step 4: Viewer build toolchain
+
+The embedded 3D viewer you'll add in Part 4 is a browser page — HTML, CSS, and JavaScript that runs inside the MCP client, not inside your Python process. Bundling that page still needs Node.js and Vite, exactly as it would in any other Python web project that ships a rich frontend.
+
+Create `package.json` in the project root:
 
 ```json
 {
   "name": "au2026-mcp-workshop-advanced",
   "version": "1.0.0",
-  "description": "APS MCP Workshop — Advanced Session (AU2026)",
+  "description": "APS MCP Workshop — Advanced Session (AU2026) — viewer UI build",
   "type": "module",
   "scripts": {
-    "build": "vite build",
-    "start": "node index.js"
+    "build": "vite build"
   },
   "dependencies": {
-    "@aps_sdk/authentication": "^1.0.0",
-    "@aps_sdk/data-management": "^1.1.0",
-    "@modelcontextprotocol/ext-apps": "^1.7.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "cors": "^2.8.6",
-    "zod": "^4.4.0"
+    "@modelcontextprotocol/ext-apps": "^1.7.0"
   },
   "devDependencies": {
     "vite": "^8.0.14",
@@ -54,21 +74,20 @@ Replace your `package.json` with the advanced version:
 }
 ```
 
-What's new compared to the beginner session:
-
 | Dependency | Why |
 | --- | --- |
-| `@modelcontextprotocol/ext-apps` | Adds `registerAppTool` / `registerAppResource` for tools that return embedded UI |
-| `cors` | The HTTP transport needs CORS so the viewer can call APS from the embedded panel |
-| `vite` + `vite-plugin-singlefile` | Bundles `ui/viewer.html` (and its imports) into a single inlined HTML string |
+| `@modelcontextprotocol/ext-apps` | The browser-side client library the viewer page uses to talk back to the MCP host (`App`, `ontoolresult`, `updateModelContext`, …) |
+| `vite` + `vite-plugin-singlefile` | Bundles `ui/viewer.html` (and its imports) into a single self-contained HTML file |
 
-Install everything:
+Install it:
 
 ```bash
 npm install
 ```
 
-## Step 4: Folder layout
+> **Two toolchains, one server.** `pip install` sets up the MCP server; `npm install` only sets up the *build step* for a static asset. Nothing in `main.py` or `server.py` shells out to Node, and nothing in the viewer imports anything from your Python code — the two sides only meet at the `dist/viewer.html` file Vite produces and `server.py` reads.
+
+## Step 5: Folder layout
 
 You'll end up with the following files by the end of the workshop. Create the `ui/` folder now; you'll fill it in Part 4.
 
@@ -78,12 +97,13 @@ ui/
   viewer.js
   viewer.css
 dist/                    # generated by `npm run build`
-  viewer.js              # bundled HTML as an ES module string
-aps.js                   # from beginner — extended in Part 2
-mcp.js                   # from beginner — extended in Parts 3 & 4
-index.js                 # rewritten in Part 3
+  viewer.html             # bundled HTML, read directly by server.py
+aps.py                    # from beginner — extended in Part 3
+server.py                 # from beginner — extended in Parts 2 & 4
+main.py                   # rewritten in Part 2
+requirements.txt
 package.json
-vite.config.js           # added in Part 4
+vite.config.js            # added in Part 4
 ```
 
 ## Checkpoint
@@ -91,11 +111,12 @@ vite.config.js           # added in Part 4
 You should now have:
 
 - [x] A repository (new or branched) with `APS_CLIENT_ID` / `APS_CLIENT_SECRET` available
+- [x] The advanced `requirements.txt` and a successful `pip install -r requirements.txt`
 - [x] The advanced `package.json` and a successful `npm install`
-- [x] The beginner `aps.js`, `mcp.js`, and `index.js` ready to be edited
+- [x] The beginner `aps.py`, `server.py`, and `main.py` ready to be edited
 
 ### Additional resources
 
-- [Express documentation](https://expressjs.com/)
+- [Starlette documentation](https://www.starlette.io/)
 - [Vite documentation](https://vitejs.dev/)
 - [MCP ext-apps package](https://www.npmjs.com/package/@modelcontextprotocol/ext-apps)

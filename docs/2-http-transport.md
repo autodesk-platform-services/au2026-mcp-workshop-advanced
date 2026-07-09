@@ -6,136 +6,170 @@ In this section you'll replace the STDIO transport from the beginner session wit
 
 ### STDIO vs. Streamable HTTP
 
-The beginner server used STDIO: VS Code launched `node index.js` as a child process and spoke JSON-RPC over its stdin/stdout. That works beautifully for local development but has three big limitations: only one client can talk to one process, the lifetime is tied to the editor, and there's no way to bolt on a web flow (like an OAuth redirect) because nothing is listening on a port.
+The beginner server used STDIO: VS Code launched `python main.py` as a child process and spoke JSON-RPC over its stdin/stdout. That works beautifully for local development but has three big limitations: only one client can talk to one process, the lifetime is tied to the editor, and there's no way to bolt on a web flow (like an OAuth redirect) because nothing is listening on a port.
 
-`StreamableHTTPServerTransport` from the MCP SDK fixes all three. The server runs independently, clients `POST` JSON-RPC messages to a single endpoint (we'll use `/mcp`), and per-client state is keyed by an `mcp-session-id` header the SDK injects on the first response.
+The MCP Python SDK's `StreamableHTTPServerTransport` fixes all three. The server runs independently, clients `POST` JSON-RPC messages to a single endpoint (we'll use `/mcp/`), and per-client state is keyed by an `Mcp-Session-Id` header the SDK injects on the first response.
 
 ### One MCP server per session
 
-The MCP SDK ties protocol state — pending requests, capabilities, subscriptions — to a transport instance. To keep clients isolated you give each one its own transport, and because tools, resources, and the auth provider are bound at construction time, each one also gets its own `McpServer` instance built by the factory you already wrote in the beginner session.
+The MCP SDK ties protocol state — pending requests, capabilities, subscriptions — to a transport instance. To keep clients isolated you give each one its own transport, and because tools, resources, and the auth provider are bound at construction time, each one also gets its own `FastMCP` instance built by the factory you already wrote in the beginner session.
 
 For now the *auth provider* is shared: one `AppAuthenticationProvider` covers the whole process because every 2-legged token represents the application itself, not any particular user. In Part 3 you'll move it inside the per-session map so each user can hold their own tokens.
 
+### Why Starlette, not Flask or FastAPI
+
+`StreamableHTTPServerTransport` speaks raw ASGI (`scope`, `receive`, `send`) so it can stream Server-Sent Events back to the client — a normal WSGI framework like Flask can't do that. Starlette is the lightweight ASGI toolkit the MCP Python SDK itself is built on, so it's the natural fit for wiring a custom multi-session route by hand. `uvicorn` is the ASGI server that actually accepts TCP connections and runs the Starlette app.
+
 ## Step 1: Keep the MCP factory unchanged
 
-`mcp.js` from the beginner workshop already returns an `McpServer` built around an injected auth provider. No changes needed in this step — the same factory works under both transports.
+`server.py` from the beginner workshop already returns a `FastMCP` instance built around an injected auth provider. No changes needed in this step — the same factory works under both transports.
 
 If you have not copied it across yet, this is what it should look like:
 
-```js
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import { getHubsProjects, getFolderContents } from './aps.js';
+```python
+import json
+from typing import Annotated
 
-export function createMcpServer(authenticationProvider) {
-    const server = new McpServer({
-        name: 'aps-mcp-server',
-        description: 'MCP server for Autodesk Platform Services',
-        version: '1.0.0'
-    });
+from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
-    server.registerTool(
-        'list-hubs-projects',
-        {
-            description: 'Lists all hubs and their projects available to the APS application.',
-        },
-        async () => {
-            const hubs = await getHubsProjects(authenticationProvider);
-            return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        }
-    );
+from aps import get_hubs_projects, get_folder_contents
 
-    server.registerTool(
-        'list-folder-contents',
-        {
-            description: 'Lists the contents of a folder in a project, or top-level folders if no folder ID is provided.',
-            inputSchema: z.object({
-                hubId: z.string().describe('Hub ID.'),
-                projectId: z.string().describe('Project ID.'),
-                folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
-            })
-        },
-        async ({ hubId, projectId, folderId }) => {
-            const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
-            return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        }
-    );
 
-    return server;
-}
+def create_mcp_server(authentication_provider):
+    mcp = FastMCP(name='aps-mcp-server', instructions='MCP server for Autodesk Platform Services')
+
+    @mcp.tool(
+        name='list-hubs-projects',
+        description='Lists all hubs and their projects available to the APS application.',
+        structured_output=False,
+    )
+    def list_hubs_projects() -> str:
+        hubs = get_hubs_projects(authentication_provider)
+        return json.dumps(hubs, indent=2)
+
+    @mcp.tool(
+        name='list-folder-contents',
+        description='Lists the contents of a folder in a project, or top-level folders if no folder ID is provided.',
+        structured_output=False,
+    )
+    def list_folder_contents(
+        hub_id: Annotated[str, Field(description='Hub ID.')],
+        project_id: Annotated[str, Field(description='Project ID.')],
+        folder_id: Annotated[str | None, Field(description='Folder ID. Omit to list top-level folders.')] = None,
+    ) -> str:
+        items = get_folder_contents(hub_id, project_id, folder_id, authentication_provider)
+        return json.dumps(items, indent=2)
+
+    return mcp
 ```
 
 ## Step 2: Rewrite the entry point
 
-Replace `index.js` with the HTTP-based version:
+Replace `main.py` with the HTTP-based version:
 
-```js
-import crypto from 'crypto';
-import cors from 'cors';
-import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
-import { AppAuthenticationProvider } from './aps.js';
-import { createMcpServer } from './mcp.js';
+```python
+import contextlib
+import os
+import sys
+import uuid
+from dataclasses import dataclass
 
-const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
-if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
-    console.error('APS_CLIENT_ID and APS_CLIENT_SECRET environment variables are required.');
-    process.exit(1);
-}
-const PORT = parseInt(process.env.PORT || '3000');
-const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+import anyio
+import uvicorn
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount
 
-const authenticationProvider = new AppAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-const transports = new Map();
+from mcp.server.streamable_http import MCP_SESSION_ID_HEADER, StreamableHTTPServerTransport
 
-const app = createMcpExpressApp({ host: '0.0.0.0' });
-app.use(cors());
+from aps import AppAuthenticationProvider
+from server import create_mcp_server
 
-app.all('/mcp', async (req, res) => {
-    let sessionId = req.headers['mcp-session-id'];
+APS_CLIENT_ID = os.environ.get('APS_CLIENT_ID')
+APS_CLIENT_SECRET = os.environ.get('APS_CLIENT_SECRET')
+if not APS_CLIENT_ID or not APS_CLIENT_SECRET:
+    print('APS_CLIENT_ID and APS_CLIENT_SECRET environment variables are required.', file=sys.stderr)
+    sys.exit(1)
+PORT = int(os.environ.get('PORT', '3000'))
+PUBLIC_URL = os.environ.get('PUBLIC_URL', f'http://localhost:{PORT}')
 
-    try {
-        if (sessionId && transports.has(sessionId)) {
-            const transport = transports.get(sessionId);
-            await transport.handleRequest(req, res, req.body);
-        } else if (!sessionId && isInitializeRequest(req.body)) {
-            sessionId = crypto.randomUUID();
-            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-            transports.set(sessionId, transport);
-            transport.onclose = () => transports.delete(sessionId);
-            const server = createMcpServer(authenticationProvider);
-            await server.connect(transport);
-            await transport.handleRequest(req, res, req.body);
-        } else {
-            res.status(400).json({
-                jsonrpc: '2.0',
-                error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
-                id: null,
-            });
-        }
-    } catch (err) {
-        console.error('MCP error:', err);
-        if (!res.headersSent) {
-            res.status(500).json({
-                jsonrpc: '2.0',
-                error: { code: -32603, message: 'Internal server error' },
-                id: null,
-            });
-        }
-    }
-});
+authentication_provider = AppAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET)
+transports: dict[str, StreamableHTTPServerTransport] = {}
+task_group: anyio.abc.TaskGroup | None = None
 
-app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
+
+async def run_session(transport, mcp_server, session_id, *, task_status):
+    async with transport.connect() as (read_stream, write_stream):
+        task_status.started()
+        try:
+            await mcp_server._mcp_server.run(
+                read_stream, write_stream, mcp_server._mcp_server.create_initialization_options()
+            )
+        except Exception as err:
+            print(f'Session {session_id} crashed:', err, file=sys.stderr)
+        finally:
+            transports.pop(session_id, None)
+
+
+async def mcp_app(scope, receive, send):
+    request = Request(scope, receive)
+    session_id = request.headers.get(MCP_SESSION_ID_HEADER)
+
+    if session_id and session_id in transports:
+        await transports[session_id].handle_request(scope, receive, send)
+    elif not session_id:
+        new_session_id = uuid.uuid4().hex
+        transport = StreamableHTTPServerTransport(mcp_session_id=new_session_id)
+        transports[new_session_id] = transport
+        mcp_server = create_mcp_server(authentication_provider)
+        assert task_group is not None
+        await task_group.start(run_session, transport, mcp_server, new_session_id)
+        await transport.handle_request(scope, receive, send)
+    else:
+        response = JSONResponse(
+            {
+                'jsonrpc': '2.0',
+                'error': {'code': -32000, 'message': 'Bad Request: No valid session ID provided'},
+                'id': None,
+            },
+            status_code=400,
+        )
+        await response(scope, receive, send)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app):
+    global task_group
+    async with anyio.create_task_group() as tg:
+        task_group = tg
+        yield
+        tg.cancel_scope.cancel()
+
+
+app = Starlette(
+    routes=[Mount('/mcp', app=mcp_app)],
+    middleware=[
+        Middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'], expose_headers=['Mcp-Session-Id']),
+    ],
+    lifespan=lifespan,
+)
+
+uvicorn.run(app, host='0.0.0.0', port=PORT)
 ```
 
 What's happening:
 
-- `createMcpExpressApp` is an Express app pre-configured by the MCP SDK with the body parsers it expects. Mount your own middleware on it — we add `cors()` so browser-based clients can reach the endpoint.
-- The `/mcp` route is shared by all sessions. A request carrying a known `mcp-session-id` is served from its stored transport.
-- A request with no session header is only let through when it is an `initialize` request — `isInitializeRequest(req.body)` guards this. Anything else (a stale session ID, or a non-initialize call with no session) gets a `400` JSON-RPC error. For a genuine initialize, generate a session ID, build a per-session `McpServer` + `StreamableHTTPServerTransport`, register it, and connect.
-- Because we generate the session ID ourselves and pass it to `sessionIdGenerator`, the transport can register in the map immediately; `transport.onclose` removes it again, so the map only ever holds live sessions.
-- The `try/catch` replies with a `500` JSON-RPC error (guarded by `res.headersSent`) if anything throws, rather than leaking the exception. Part 3 builds directly on this structure.
+- `StreamableHTTPServerTransport` is the low-level, per-connection class the MCP Python SDK exposes for exactly this situation — one transport per session, wired to a `FastMCP` instance you build yourself, instead of the SDK's built-in multi-session helper (which assumes one shared server for every client).
+- `mcp_app` is mounted at `/mcp` as a raw ASGI callable (via `Mount`, not `Route`) because `transport.handle_request(scope, receive, send)` needs to stream a Server-Sent Events response itself — a normal request-in, response-out handler can't do that.
+- A request carrying a known `Mcp-Session-Id` header is served from its stored transport. A request with no session header always gets a fresh transport and a brand-new per-session `FastMCP` instance; if the very first message on that transport isn't actually `initialize`, the MCP protocol layer itself rejects it. Anything else (a stale or unknown session ID) gets a `400` JSON-RPC error.
+- `transport.connect()` is an async context manager that yields the read/write streams the underlying `FastMCP` server needs. Because that has to keep running for the *whole life of the session* — not just one HTTP request — `run_session` runs as a background task in a shared `anyio` task group, started from the Starlette app's `lifespan`. `task_group.start(...)` waits until `task_status.started()` fires, so by the time `mcp_app` calls `transport.handle_request(...)`, the session is already listening.
+- The `finally` block removes the transport from the `transports` map once its background task ends (the session closed), so the map only ever holds live sessions.
+
+> **Trailing slash.** Starlette's `Mount` only matches `/mcp/...` — a bare `POST /mcp` gets a `307` redirect to `/mcp/`. Most MCP clients (including VS Code) follow redirects transparently, but to avoid the extra round trip this workshop's `.vscode/mcp.json` and `curl` examples use the trailing-slash URL directly.
 
 > **Public URL.** `PUBLIC_URL` is unused right now but worth threading through — Part 3 needs it for the OAuth callback and Part 4 needs it for the viewer's CSP.
 
@@ -148,25 +182,25 @@ What's happening:
   "servers": {
     "APS MCP Server (Advanced)": {
       "type": "http",
-      "url": "http://localhost:3000/mcp"
+      "url": "http://localhost:3000/mcp/"
     }
   }
 }
 ```
 
-When VS Code connects, it issues a `POST` to `/mcp` with no session header. The server allocates a session, returns the ID in the response, and Copilot reuses it for every subsequent message.
+When VS Code connects, it issues a `POST` to `/mcp/` with no session header. The server allocates a session, returns the ID in the response, and Copilot reuses it for every subsequent message.
 
 ## Checkpoint
 
 You should now have:
 
-- [x] `mcp.js` carried over from the beginner project (no changes)
-- [x] `index.js` running an Express app at `/mcp`
+- [x] `server.py` carried over from the beginner project (no changes)
+- [x] `main.py` running a Starlette + uvicorn app at `/mcp/`
 - [x] `.vscode/mcp.json` pointing Copilot at the HTTP endpoint
 
 ### Try it out
 
-1. Start the server: `npm start`. You should see `MCP server listening on http://localhost:3000/mcp`.
+1. Start the server: `python main.py`. You should see `Uvicorn running on http://0.0.0.0:3000`.
 2. Open VS Code, register the server from `.vscode/mcp.json`, and open Copilot Chat in agent mode.
 3. Ask: *"What Forma projects do I have access to?"*
 4. Copilot calls `list-hubs-projects` and returns the hubs visible to your APS *application* (the same data you saw in the beginner workshop, since the auth model hasn't changed yet).
@@ -176,7 +210,7 @@ The output is still scoped to the app, not a user — exactly what Part 3 will c
 > **Debugging tip — MCP Inspector.** When the HTTP transport doesn't behave, bypass Copilot and connect the MCP Inspector to the running server:
 >
 > ```bash
-> npx @modelcontextprotocol/inspector http://localhost:3000/mcp
+> npx @modelcontextprotocol/inspector http://localhost:3000/mcp/
 > ```
 >
 > The command starts the Inspector's web UI on port **6274** inside your Codespace. Because the Codespace is a remote environment, the web UI is **not** automatically available in your local browser — you need to forward the port:
@@ -185,12 +219,12 @@ The output is still scoped to the app, not a user — exactly what Part 3 will c
 > 2. Look for port `6274` — VS Code usually detects and adds it automatically when the Inspector starts.
 > 3. Hover over the **Forwarded Address** column and click the globe icon to open it in your browser.
 >
-> The Inspector shows the JSON-RPC traffic (including the `mcp-session-id` header negotiation), lets you invoke tools manually, and is the fastest way to isolate transport bugs from tool bugs.
+> The Inspector shows the JSON-RPC traffic (including the `Mcp-Session-Id` header negotiation), lets you invoke tools manually, and is the fastest way to isolate transport bugs from tool bugs.
 >
-> Note that this command connects to your already-running server at `localhost:3000` — **start the server first** with `npm start`, then run the Inspector command in a second terminal.
+> Note that this command connects to your already-running server at `localhost:3000` — **start the server first** with `python main.py`, then run the Inspector command in a second terminal.
 
 ### Additional resources
 
 - [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http)
-- [Express middleware reference](https://expressjs.com/en/4x/api.html)
+- [Starlette documentation](https://www.starlette.io/)
 - [MCP Inspector](https://github.com/modelcontextprotocol/inspector)

@@ -2,7 +2,7 @@
   "servers": {
     "APS MCP Server (Advanced)": {
       "type": "http",
-      "url": "http://localhost:3000/mcp"
+      "url": "http://localhost:3000/mcp/"
     }
   }
 }
