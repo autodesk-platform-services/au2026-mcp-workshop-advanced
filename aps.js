@@ -20,8 +20,8 @@ export class UserAuthenticationProvider {
         return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
     }
 
-    getAuthorizationUrl(state) {
-        return this.authClient.authorize(this.clientId, ResponseType.Code, this.callbackUrl, SCOPES, { state });
+    getAuthorizationUrl() {
+        return this.authClient.authorize(this.clientId, ResponseType.Code, this.callbackUrl, SCOPES);
     }
 
     async exchangeAuthCode(code) {

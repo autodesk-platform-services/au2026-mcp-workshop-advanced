@@ -2,7 +2,7 @@
 
 ## Spec-Driven Development with GitHub Spec-Kit
 
-The advanced server has three moving parts — HTTP transport, per-session OAuth, and the embedded viewer UI — and a change in one layer can quietly break the other two. The beginner workshop walked you through ad-hoc "vibe coding" with Copilot. For features at this scale it pays to slow down: write a specification first, plan the implementation, then let Copilot execute against an explicit checklist.
+The advanced server has three moving parts — HTTP transport, 3-legged OAuth, and the embedded viewer UI — and a change in one layer can quietly break the other two. The beginner workshop walked you through ad-hoc "vibe coding" with Copilot. For features at this scale it pays to slow down: write a specification first, plan the implementation, then let Copilot execute against an explicit checklist.
 
 [GitHub Spec-Kit](https://github.com/github/spec-kit) is a small toolkit that does exactly that. It installs a set of slash commands into Copilot (and other agents) that walk you through a spec-driven workflow.
 
@@ -10,7 +10,8 @@ Some features worth tackling this way:
 
 - **Issues tool.** Add a tool that lists open issues on a project using the [ACC Issues API](https://aps.autodesk.com/en/docs/acc/v1/overview/field-guide/issues/). Use the selection event from the viewer to filter issues by element.
 - **Multi-model preview.** Extend `preview-design` to accept an array of designs and aggregate them in a single viewer scene with `loadDocumentNode` per model.
-- **Persisted sessions.** Replace the in-memory `Map`s in `index.js` with a small store (Redis, SQLite) so a Copilot restart doesn't force the user to log in again.
+- **Persisted auth.** A server restart clears the shared `UserAuthenticationProvider`'s tokens and forces a fresh login for everyone. Persist the refresh token (encrypted, e.g. Redis/SQLite) and rehydrate it on startup so a restart doesn't log the server out.
+- **Real multi-user auth.** Follow through on the design note in [Part 3](3-user-auth.md#one-shared-provider-for-now) — see [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) below for a full reference implementation.
 - **Smarter viewer context.** When the user selects an element, look it up via the Model Derivative properties API and feed a richer description back through `updateModelContext`.
 - **Public deployment.** Put the server behind a stable hostname and update the APS app's Callback URL. Containerise it so Vite builds at image-build time and the runtime doesn't need a `dist/` checkout.
 
@@ -39,11 +40,11 @@ Below is the kind of input each slash command expects. Don't copy these verbatim
 **`/constitution`** — invariants this codebase already enforces:
 
 ```text
-- index.js stays thin: it only wires Express, the MCP transport, and the auth
+- index.js stays thin: it only wires Express, the MCP handler, and the auth
   provider. New features go in aps.js (APS calls), mcp.js (tool registration),
   or web/ (viewer UI).
 - Access tokens never leave UserAuthenticationProvider. Tools receive a
-  per-session token via the provider, never via globals or request bodies.
+  token via the provider, never via globals or request bodies.
 - aps.js must not import from mcp.js. APS client code stays transport-agnostic
   so it can be reused outside MCP.
 - PUBLIC_URL must match the APS app's Callback URL exactly, including scheme
@@ -94,19 +95,54 @@ Review checklist before /tasks:
 
 `/tasks` then expands the plan into reviewable steps, and `/implement` executes them one at a time so you can catch regressions in HTTP transport or the auth flow before they compound.
 
+## Real per-user auth with Auth0 (Layer 1)
+
+Part 3 leaves one question deliberately unanswered: *which human is behind this HTTP request?* Its `UserAuthenticationProvider` is shared by the whole process because there's no stable, per-request identity to key anything else on — see the [design note](3-user-auth.md#one-shared-provider-for-now). [**aps-mcp-auth0-example**](https://github.com/autodesk-platform-services/aps-mcp-auth0-example) is a reference implementation that answers that question: it adds the Layer 1 handshake this workshop skips, using [Auth0](https://auth0.com) as the authorization server, on top of the same APS MCP server shape you've just built.
+
+### Architecture
+
+The two OAuth layers stay independent end to end:
+
+- **Layer 1 (MCP client ↔ MCP server).** Auth0 protects `/mcp` directly: every request needs an `Authorization: Bearer` token, which the server validates against Auth0's JWKS endpoint. The token's `sub` claim becomes the `userId` — a stable identity that survives client reconnects, unlike an MCP session ID.
+- **Layer 2 (MCP server ↔ APS).** The same 3-legged flow you built in Part 3, unchanged, except the provider is now looked up (or created) per `userId` from a `Map<userId, UserAuthenticationProvider>` instead of shared process-wide. The Auth0 token is never forwarded to APS — the two flows never touch.
+
+The example also implements [Client ID Metadata Documents (CIMD)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00) via a `/.well-known/oauth-protected-resource/mcp` endpoint, so MCP clients can discover Auth0 as the authorization server and authenticate without you manually registering each client in the Auth0 tenant — the same gap flagged as out of scope in [Part 3](3-user-auth.md#one-shared-provider-for-now).
+
+### How its files map onto this project
+
+| This project | `aps-mcp-auth0-example` | What changes |
+|---|---|---|
+| `index.js` | `app.js` | Wires the Layer 1 bearer-token check and CIMD metadata routes in front of the existing `/mcp` handler |
+| `mcp.js` | `mcp.js` | Same stateless factory shape — `createMcpHandler` still builds one `McpServer` per request |
+| `aps.js` (`UserAuthenticationProvider`) | `auth/aps.js` | Identical 3-legged logic, now cached in a `Map<userId, UserAuthenticationProvider>` instead of one shared instance |
+| *(new)* | `auth/auth0.js` | JWKS-based token verification and Auth0 metadata discovery |
+| *(new)* | `config.js` | Centralises the extra environment variables Layer 1 needs |
+
+### Setup, in brief
+
+The repo's own README has the full walkthrough; the shape of it:
+
+1. **Auth0 tenant.** Create an API with identifier `https://<PUBLIC_HOST>/mcp`, enable **Client ID Metadata Document Registration** and the **Resource Parameter Compatibility Profile** under Advanced Settings, then grant your client access to it.
+2. **APS app.** Reuse the one from this workshop — just add `https://<PUBLIC_HOST>/auth/callback` as a callback URL if it isn't already registered.
+3. **Environment variables.** `APS_CLIENT_ID`, `APS_CLIENT_SECRET`, `AUTH0_DOMAIN`, and `PUBLIC_HOST` (every derived URL and the Auth0 audience come from this one value).
+
+> **This one can't run on `localhost`.** Auth0 needs a publicly reachable HTTPS audience and callback, so `PUBLIC_HOST` must be a real hostname — a forwarded Codespace port works, same as `PUBLIC_URL` did in Part 3.
+
 ## Production checklist
 
 The advanced server is much closer to a real product than the beginner's STDIO build, but it still has rough edges. Address these before shipping:
 
 | Area | Workshop state | Production requirement |
 |---|---|---|
-| Session store | In-memory `Map` per process | Distributed store with TTL and cleanup |
+| Transport state | Stateless `createMcpHandler` + `toNodeHandler` wiring, no session map | Fine as-is for request/response tools; add a distributed `EventStore` only if you introduce resumable SSE streams or server-initiated push |
+| APS identity | One shared `UserAuthenticationProvider` for the whole process | `Map<userId, UserAuthenticationProvider>`, keyed by the user ID a Layer 1 authorization server puts on each request |
 | Refresh tokens | Held in memory only | Encrypted persistence so users don't re-auth on restart |
-| Multi-tenant safety | One process trust boundary | Per-session rate limiting, audit logs, isolation |
+| Multi-tenant safety | One process trust boundary, one shared APS identity | Per-user isolation via the identity map above, plus rate limiting, audit logs |
 | Callback URL | `http://localhost:3000/auth/callback` | HTTPS-only public URL registered in APS |
+| Host/origin validation | `createMcpExpressApp({ host: '0.0.0.0' })`, no allowlist (required for Codespace port forwarding) | Pass `allowedHosts` / `allowedOrigins` (or bind to a fixed hostname) once you have a stable public domain |
 | Viewer CSP | Permissive `connectDomains` | Tighten to only the endpoints the APS Viewer actually uses |
 | Error handling | Errors logged to stderr | Structured logging, alerting, retry/backoff for APS calls |
 | Vite bundle | Built on demand | Built at CI time and shipped as part of the artifact |
-| MCP client access | Open `/mcp` endpoint | Authenticate the MCP client itself (mTLS, signed tokens, OAuth metadata) |
+| MCP client access | Open `/mcp` endpoint | A CIMD-enabled authorization server in front of the MCP server, issuing Layer 1 tokens the server validates on every request — see [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) above |
 
 > **What's next?** With HTTP transport, 3-legged auth, and embedded UI in place, your server can host real product experiments. A natural follow-up is to add write operations (creating folders, uploading versions) — those need careful scoping and user-visible confirmations, but the building blocks are now all here.

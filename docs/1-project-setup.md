@@ -42,8 +42,11 @@ Replace your `package.json` with the advanced version:
   "dependencies": {
     "@aps_sdk/authentication": "^1.0.0",
     "@aps_sdk/data-management": "^1.1.0",
+    "@modelcontextprotocol/express": "^2.0.0",
     "@modelcontextprotocol/ext-apps": "^1.7.0",
+    "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/server": "^2.0.0",
     "cors": "^2.8.6",
     "zod": "^4.4.0"
   },
@@ -58,7 +61,10 @@ What's new compared to the beginner session:
 
 | Dependency | Why |
 | --- | --- |
-| `@modelcontextprotocol/ext-apps` | Adds `registerAppTool` / `registerAppResource` for tools that return embedded UI |
+| `@modelcontextprotocol/express` | The `createMcpExpressApp` factory that pre-configures Express for MCP |
+| `@modelcontextprotocol/node` | The `toNodeHandler` adapter that bridges the fetch-based MCP handler to Express's `(req, res)` signature |
+| `@modelcontextprotocol/ext-apps` | The browser-side `App` class the bundled viewer uses to talk back to the MCP client |
+| `@modelcontextprotocol/sdk` | Still required as of this writing — `@modelcontextprotocol/ext-apps` imports it internally for its viewer bundle. Nothing in `mcp.js` or `index.js` imports from it directly; every server-side import in this session comes from `@modelcontextprotocol/server` and its adapters |
 | `cors` | The HTTP transport needs CORS so the viewer can call APS from the embedded panel |
 | `vite` + `vite-plugin-singlefile` | Bundles `ui/viewer.html` (and its imports) into a single inlined HTML string |
 
@@ -98,4 +104,5 @@ You should now have:
 
 - [Express documentation](https://expressjs.com/)
 - [Vite documentation](https://vitejs.dev/)
+- [MCP TypeScript SDK v2 migration guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/upgrade-to-v2.md)
 - [MCP ext-apps package](https://www.npmjs.com/package/@modelcontextprotocol/ext-apps)

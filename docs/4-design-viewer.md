@@ -1,17 +1,19 @@
 # Part 4: Embedded Viewer
 
-In this section you'll add a new MCP tool called `preview-design` that renders an Autodesk design directly inside the chat using the **APS Viewer**. Unlike the text-only tools from earlier parts, this one returns an **app resource** — a self-contained HTML page that the MCP client loads in a panel. The viewer talks back to the server via `@modelcontextprotocol/ext-apps`, so selecting objects in 3D becomes additional context the AI can reason about.
+In this section you'll add a new MCP tool called `preview-design` that renders an Autodesk design directly inside the chat using the **APS Viewer**. Unlike the text-only tools from earlier parts, this one returns an **app resource** — a self-contained HTML page that the MCP client loads in a panel. The viewer talks back to the server via `@modelcontextprotocol/ext-apps`'s browser-side client, so selecting objects in 3D becomes additional context the AI can reason about.
 
 ## Theory
 
 ### App tools and app resources
 
-The `@modelcontextprotocol/ext-apps` package layers two concepts on top of the standard MCP server:
+MCP Apps layers two concepts on top of the standard MCP server, both expressed as plain `_meta` fields on the standard `registerTool` / `registerResource` calls you already know from the beginner session:
 
-- **App resource.** A named resource (identified by a `ui://` URI) whose body is an HTML document. The MCP client renders it in a sandboxed panel with a configurable CSP.
-- **App tool.** A tool whose definition references an app resource. When the tool returns, the client shows the resource and forwards the tool's `structuredContent` to it.
+- **App resource.** A named resource (identified by a `ui://` URI) whose body is an HTML document, registered with the `text/html;profile=mcp-app` MIME type. The MCP client renders it in a sandboxed panel with a configurable CSP.
+- **App tool.** A tool whose `_meta.ui.resourceUri` field references an app resource. When the tool returns, the client shows the resource and forwards the tool's `structuredContent` to it.
 
 The split mirrors the way browsers separate the page from the data: the resource is loaded once and cached; tool results stream in as the AI works.
+
+> **Design note:** `@modelcontextprotocol/ext-apps` used to ship a `registerAppTool` / `registerAppResource` pair of server-side helpers that did nothing more than set these `_meta` fields for you. As of this writing that package hasn't been updated for MCP SDK v2 yet, so this workshop registers the resource and tool directly with `server.registerTool` / `server.registerResource` and sets `_meta` by hand — one less dependency, and it reads as plain MCP once you know the two fields to set. `@modelcontextprotocol/ext-apps` is still a real dependency of this project, just narrowed to the one thing that isn't optional: the browser-side `App` client `viewer.js` uses to talk back to the host.
 
 ### What the viewer needs
 
@@ -162,16 +164,16 @@ You should see `dist/viewer.html` and `dist/viewer.js` appear.
 
 ## Step 3: Register the resource and tool
 
-Extend `mcp.js` to declare the viewer resource and the `preview-design` app tool. Update the imports and constants at the top of the file:
+Extend `mcp.js` to declare the viewer resource and the `preview-design` tool. Update the imports and constants at the top of the file:
 
 ```js
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { registerAppTool, registerAppResource } from '@modelcontextprotocol/ext-apps/server';
+import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
 import VIEWER_HTML from './dist/viewer.js';
 
 const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
+const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
 const VIEWER_DOMAINS = [
     'https://developer.api.autodesk.com',
     'https://cdn.derivative.autodesk.com',
@@ -179,52 +181,63 @@ const VIEWER_DOMAINS = [
 ];
 ```
 
-The `VIEWER_DOMAINS` list ends up in the resource's Content Security Policy so the embedded viewer can call the APS APIs it depends on.
+`VIEWER_RESOURCE_MIME_TYPE` is the MIME type MCP Apps uses to mark a resource as an app UI. The `VIEWER_DOMAINS` list ends up in the resource's Content Security Policy so the embedded viewer can call the APS APIs it depends on.
 
-Add `publicUrl` as a third argument to the factory signature (needed for the viewer CSP) and register the `preview-design` tool plus the viewer resource **before** `return server`:
+Add `publicUrl` as a second argument to the factory signature (needed for the viewer CSP) and register the `preview-design` tool plus the viewer resource **before** `return server`:
 
 ```js
-export function createMcpServer(authenticationProvider, authUrl, publicUrl) {
+export function createMcpServer(authenticationProvider, publicUrl) {
     // ... existing McpServer, withAuth helper, and two registerTool calls ...
 
-    registerAppTool(server, 'preview-design', {
-        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
-        inputSchema: z.object({
-            projectId: z.string().describe('Project ID the design belongs to.'),
-            designId: z.string().describe('Item ID of the design to preview.'),
-            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
-        }),
-        _meta: {
-            ui: { resourceUri: VIEWER_RESOURCE_URI },
-        },
-    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
-        const accessToken = await authenticationProvider.getAccessToken();
-        const tip = await getItemTip(projectId, designId, authenticationProvider);
-        const config = {
-            accessToken,
-            env: 'AutodeskProduction2',
-            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
-        };
-        return {
-            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
-            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
-        };
-    }));
-
-    registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
-        contents: [{
-            text: VIEWER_HTML,
+    server.registerTool(
+        'preview-design',
+        {
+            description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
+            inputSchema: z.object({
+                projectId: z.string().describe('Project ID the design belongs to.'),
+                designId: z.string().describe('Item ID of the design to preview.'),
+                region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
+            }),
             _meta: {
-                ui: {
-                    domain: publicUrl,
-                    csp: {
-                        resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
-                        connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
+                ui: { resourceUri: VIEWER_RESOURCE_URI },
+            },
+        },
+        withAuth(async ({ projectId, designId, region = 'US' }) => {
+            const accessToken = await authenticationProvider.getAccessToken();
+            const tip = await getItemTip(projectId, designId, authenticationProvider);
+            const config = {
+                accessToken,
+                env: 'AutodeskProduction2',
+                api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
+            };
+            return {
+                structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
+                content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
+            };
+        })
+    );
+
+    server.registerResource(
+        'viewer',
+        VIEWER_RESOURCE_URI,
+        { mimeType: VIEWER_RESOURCE_MIME_TYPE },
+        async (uri) => ({
+            contents: [{
+                uri: uri.toString(),
+                mimeType: VIEWER_RESOURCE_MIME_TYPE,
+                text: VIEWER_HTML,
+                _meta: {
+                    ui: {
+                        domain: publicUrl,
+                        csp: {
+                            resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
+                            connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
+                        },
                     },
                 },
-            },
-        }]
-    }));
+            }]
+        })
+    );
 
     return server;
 }
@@ -232,18 +245,19 @@ export function createMcpServer(authenticationProvider, authUrl, publicUrl) {
 
 What's new versus a normal tool:
 
-- `_meta.ui.resourceUri` tells the client which app resource to surface alongside this tool's result.
+- `_meta.ui.resourceUri` tells the client which app resource to surface alongside this tool's result — that's the entire contract between a tool and its UI.
 - The handler is wrapped in the same `withAuth` helper used by the other tools, so an unauthenticated session gets the login URL instead of a crash.
 - The handler returns **both** `structuredContent` (consumed by `viewer.js` via `ontoolresult`) and a plain text `content` block (shown to the user / model as a confirmation).
 - The access token is fetched first, then the item tip. The token is short-lived and is included in `structuredContent.config` so the viewer can authenticate its own requests to the derivative service.
+- The resource's read callback receives the request `uri` as a `URL` — echo it back on `contents[0].uri` (MCP requires each content entry to carry its own URI) and set `mimeType` again on the content entry alongside the resource-level one.
 
 ## Step 4: Update the entry point
 
-`index.js` already builds the per-session auth provider and computes its login URL. Add `PUBLIC_URL` as a third argument to the `createMcpServer` call so the viewer resource knows which origin to whitelist:
+`index.js` already builds the shared auth provider and hands the factory to `createMcpHandler`. Add `PUBLIC_URL` as a second argument to the `createMcpServer` call so the viewer resource knows which origin to whitelist:
 
 ```diff
-- const server = createMcpServer(authProvider, authUrl);
-+ const server = createMcpServer(authProvider, authUrl, PUBLIC_URL);
+- const mcpHandler = createMcpHandler(() => createMcpServer(authProvider));
++ const mcpHandler = createMcpHandler(() => createMcpServer(authProvider, PUBLIC_URL));
 ```
 
 That's the only change in `index.js`.
@@ -263,25 +277,27 @@ You should now have:
     </summary>
 
 ```js
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { registerAppTool, registerAppResource } from '@modelcontextprotocol/ext-apps/server';
+import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
 import VIEWER_HTML from './dist/viewer.js';
 
 const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
+const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
 const VIEWER_DOMAINS = [
     'https://developer.api.autodesk.com',
     'https://cdn.derivative.autodesk.com',
     'https://fonts.autodesk.com',
 ];
 
-export function createMcpServer(authenticationProvider, authUrl, publicUrl) {
+export function createMcpServer(authenticationProvider, publicUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
+
+    const authUrl = authenticationProvider.getAuthorizationUrl();
 
     const withAuth = (handler) => async (input) => {
         if (!authenticationProvider.isAuthenticated()) {
@@ -317,44 +333,55 @@ export function createMcpServer(authenticationProvider, authUrl, publicUrl) {
         })
     );
 
-    registerAppTool(server, 'preview-design', {
-        description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
-        inputSchema: z.object({
-            projectId: z.string().describe('Project ID the design belongs to.'),
-            designId: z.string().describe('Item ID of the design to preview.'),
-            region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
-        }),
-        _meta: {
-            ui: { resourceUri: VIEWER_RESOURCE_URI },
-        },
-    }, withAuth(async ({ projectId, designId, region = 'US' }) => {
-        const accessToken = await authenticationProvider.getAccessToken();
-        const tip = await getItemTip(projectId, designId, authenticationProvider);
-        const config = {
-            accessToken,
-            env: 'AutodeskProduction2',
-            api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
-        };
-        return {
-            structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
-            content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
-        };
-    }));
-
-    registerAppResource(server, 'viewer', VIEWER_RESOURCE_URI, {}, async () => ({
-        contents: [{
-            text: VIEWER_HTML,
+    server.registerTool(
+        'preview-design',
+        {
+            description: 'Displays an interactive 3D preview of a design in APS Viewer. Use this when the user wants to visualise, inspect, or explore a design file.',
+            inputSchema: z.object({
+                projectId: z.string().describe('Project ID the design belongs to.'),
+                designId: z.string().describe('Item ID of the design to preview.'),
+                region: z.string().optional().describe('Hub region (e.g. "US", "EMEA"). Defaults to "US".'),
+            }),
             _meta: {
-                ui: {
-                    domain: publicUrl,
-                    csp: {
-                        resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
-                        connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
+                ui: { resourceUri: VIEWER_RESOURCE_URI },
+            },
+        },
+        withAuth(async ({ projectId, designId, region = 'US' }) => {
+            const accessToken = await authenticationProvider.getAccessToken();
+            const tip = await getItemTip(projectId, designId, authenticationProvider);
+            const config = {
+                accessToken,
+                env: 'AutodeskProduction2',
+                api: region === 'US' ? 'streamingV2' : `streamingV2_${region}`,
+            };
+            return {
+                structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
+                content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
+            };
+        })
+    );
+
+    server.registerResource(
+        'viewer',
+        VIEWER_RESOURCE_URI,
+        { mimeType: VIEWER_RESOURCE_MIME_TYPE },
+        async (uri) => ({
+            contents: [{
+                uri: uri.toString(),
+                mimeType: VIEWER_RESOURCE_MIME_TYPE,
+                text: VIEWER_HTML,
+                _meta: {
+                    ui: {
+                        domain: publicUrl,
+                        csp: {
+                            resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
+                            connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
+                        },
                     },
                 },
-            },
-        }]
-    }));
+            }]
+        })
+    );
 
     return server;
 }
@@ -368,11 +395,10 @@ export function createMcpServer(authenticationProvider, authUrl, publicUrl) {
     </summary>
 
 ```js
-import crypto from 'crypto';
 import cors from 'cors';
-import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { createMcpExpressApp } from '@modelcontextprotocol/express';
+import { createMcpHandler } from '@modelcontextprotocol/server';
+import { toNodeHandler } from '@modelcontextprotocol/node';
 import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -385,53 +411,19 @@ const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
 
-const sessions = new Map();
+const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, CALLBACK_URL);
+const mcpHandler = createMcpHandler(() => createMcpServer(authProvider, PUBLIC_URL));
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());
 
-app.all('/mcp', async (req, res) => {
-    let sessionId = req.headers['mcp-session-id'];
-
-    try {
-        if (sessionId && sessions.has(sessionId)) {
-            const { transport } = sessions.get(sessionId);
-            await transport.handleRequest(req, res, req.body);
-        } else if (!sessionId && isInitializeRequest(req.body)) {
-            sessionId = crypto.randomUUID();
-            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-            const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, CALLBACK_URL);
-            sessions.set(sessionId, { transport, authProvider });
-            transport.onclose = () => sessions.delete(sessionId);
-            const authUrl = authProvider.getAuthorizationUrl(sessionId);
-            const server = createMcpServer(authProvider, authUrl, PUBLIC_URL);
-            await server.connect(transport);
-            await transport.handleRequest(req, res, req.body);
-        } else {
-            res.status(400).json({
-                jsonrpc: '2.0',
-                error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
-                id: null,
-            });
-        }
-    } catch (err) {
-        console.error('MCP error:', err);
-        if (!res.headersSent) {
-            res.status(500).json({
-                jsonrpc: '2.0',
-                error: { code: -32603, message: 'Internal server error' },
-                id: null,
-            });
-        }
-    }
-});
+const mcpNodeHandler = toNodeHandler(mcpHandler);
+app.all('/mcp', (req, res) => mcpNodeHandler(req, res, req.body));
 
 app.get('/auth/callback', async (req, res) => {
-    const { code, state: sessionId } = req.query;
-    if (!code || !sessionId) return res.status(400).send('Missing code or state parameter.');
-    if (!sessions.has(sessionId)) return res.status(400).send('Invalid or expired session ID.');
+    const { code } = req.query;
+    if (!code) return res.status(400).send('Missing code parameter.');
     try {
-        const { authProvider } = sessions.get(sessionId);
         await authProvider.exchangeAuthCode(code);
         res.send('Login successful! You can close this window and return to your AI assistant.');
     } catch (err) {
@@ -494,10 +486,10 @@ export default defineConfig({
 
 ### Where next?
 
-You've now got an HTTP MCP server with per-user OAuth and an embedded 3D viewer — the same building blocks production APS integrations use. The [Extras](extras.md) page covers spec-driven development with GitHub Spec-Kit (recommended once changes start touching multiple layers at once) and a production checklist for shipping this server as a real service.
+You've now got an HTTP MCP server that authenticates as a real Autodesk user via 3-legged OAuth, with an embedded 3D viewer on top — the core mechanics behind any AI assistant that acts on Autodesk Platform Services on a user's behalf. The [Extras](extras.md) page covers spec-driven development with GitHub Spec-Kit (recommended once changes start touching multiple layers at once), plus pointers for going further: real per-user auth and a checklist for hardening this server toward production use.
 
 ### Additional resources
 
 - [APS Viewer developer guide](https://aps.autodesk.com/en/docs/viewer/v7/developers_guide/overview/)
 - [`@modelcontextprotocol/ext-apps` documentation](https://www.npmjs.com/package/@modelcontextprotocol/ext-apps)
-- [MCP UI resources spec](https://modelcontextprotocol.io/specification/2025-06-18/server/resources)
+- [MCP UI resources spec](https://modelcontextprotocol.io/specification/2026-07-28/server/resources)

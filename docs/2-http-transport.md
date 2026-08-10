@@ -8,13 +8,13 @@ In this section you'll replace the STDIO transport from the beginner session wit
 
 The beginner server used STDIO: VS Code launched `node index.js` as a child process and spoke JSON-RPC over its stdin/stdout. That works beautifully for local development but has three big limitations: only one client can talk to one process, the lifetime is tied to the editor, and there's no way to bolt on a web flow (like an OAuth redirect) because nothing is listening on a port.
 
-`StreamableHTTPServerTransport` from the MCP SDK fixes all three. The server runs independently, clients `POST` JSON-RPC messages to a single endpoint (we'll use `/mcp`), and per-client state is keyed by an `mcp-session-id` header the SDK injects on the first response.
+`createMcpHandler` from `@modelcontextprotocol/server`, adapted to Express with `toNodeHandler` from `@modelcontextprotocol/node`, fixes all three. The server runs independently, and clients `POST` JSON-RPC messages to a single endpoint (we'll use `/mcp`).
 
-### One MCP server per session
+### One handler, one factory
 
-The MCP SDK ties protocol state — pending requests, capabilities, subscriptions — to a transport instance. To keep clients isolated you give each one its own transport, and because tools, resources, and the auth provider are bound at construction time, each one also gets its own `McpServer` instance built by the factory you already wrote in the beginner session.
+`createMcpHandler` takes a single argument: a factory function it calls to build an `McpServer`. Handing it `() => createMcpServer(authenticationProvider)` is enough — tools and resources close over whatever the factory received, so every `McpServer` it builds comes out fully wired without you touching a transport object, a session map, or a `crypto.randomUUID()` call. `createMcpHandler` manages the protocol-level request/response bookkeeping internally, whatever that turns out to require for a given client.
 
-For now the *auth provider* is shared: one `AppAuthenticationProvider` covers the whole process because every 2-legged token represents the application itself, not any particular user. In Part 3 you'll move it inside the per-session map so each user can hold their own tokens.
+That works here because the *auth provider* is shared, not per-client: one `AppAuthenticationProvider` covers the whole process because every 2-legged token represents the application itself, not any particular user. In Part 3 you'll swap it for a `UserAuthenticationProvider` holding real user tokens — but you'll keep it just as shared, a workshop simplification Part 3 explains in detail. Because the factory is the only moving part, the beginner's `mcp.js` needs no changes at all to work under this transport.
 
 ## Step 1: Keep the MCP factory unchanged
 
@@ -23,7 +23,7 @@ For now the *auth provider* is shared: one `AppAuthenticationProvider` covers th
 If you have not copied it across yet, this is what it should look like:
 
 ```js
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents } from './aps.js';
 
@@ -70,11 +70,10 @@ export function createMcpServer(authenticationProvider) {
 Replace `index.js` with the HTTP-based version:
 
 ```js
-import crypto from 'crypto';
 import cors from 'cors';
-import { createMcpExpressApp } from '@modelcontextprotocol/sdk/server/express.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { createMcpExpressApp } from '@modelcontextprotocol/express';
+import { createMcpHandler } from '@modelcontextprotocol/server';
+import { toNodeHandler } from '@modelcontextprotocol/node';
 import { AppAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
 
@@ -87,55 +86,26 @@ const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 
 const authenticationProvider = new AppAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET);
-const transports = new Map();
+const mcpHandler = createMcpHandler(() => createMcpServer(authenticationProvider));
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());
 
-app.all('/mcp', async (req, res) => {
-    let sessionId = req.headers['mcp-session-id'];
-
-    try {
-        if (sessionId && transports.has(sessionId)) {
-            const transport = transports.get(sessionId);
-            await transport.handleRequest(req, res, req.body);
-        } else if (!sessionId && isInitializeRequest(req.body)) {
-            sessionId = crypto.randomUUID();
-            const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => sessionId });
-            transports.set(sessionId, transport);
-            transport.onclose = () => transports.delete(sessionId);
-            const server = createMcpServer(authenticationProvider);
-            await server.connect(transport);
-            await transport.handleRequest(req, res, req.body);
-        } else {
-            res.status(400).json({
-                jsonrpc: '2.0',
-                error: { code: -32000, message: 'Bad Request: No valid session ID provided' },
-                id: null,
-            });
-        }
-    } catch (err) {
-        console.error('MCP error:', err);
-        if (!res.headersSent) {
-            res.status(500).json({
-                jsonrpc: '2.0',
-                error: { code: -32603, message: 'Internal server error' },
-                id: null,
-            });
-        }
-    }
-});
+const mcpNodeHandler = toNodeHandler(mcpHandler);
+app.all('/mcp', (req, res) => mcpNodeHandler(req, res, req.body));
 
 app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
 ```
 
 What's happening:
 
-- `createMcpExpressApp` is an Express app pre-configured by the MCP SDK with the body parsers it expects. Mount your own middleware on it — we add `cors()` so browser-based clients can reach the endpoint.
-- The `/mcp` route is shared by all sessions. A request carrying a known `mcp-session-id` is served from its stored transport.
-- A request with no session header is only let through when it is an `initialize` request — `isInitializeRequest(req.body)` guards this. Anything else (a stale session ID, or a non-initialize call with no session) gets a `400` JSON-RPC error. For a genuine initialize, generate a session ID, build a per-session `McpServer` + `StreamableHTTPServerTransport`, register it, and connect.
-- Because we generate the session ID ourselves and pass it to `sessionIdGenerator`, the transport can register in the map immediately; `transport.onclose` removes it again, so the map only ever holds live sessions.
-- The `try/catch` replies with a `500` JSON-RPC error (guarded by `res.headersSent`) if anything throws, rather than leaking the exception. Part 3 builds directly on this structure.
+- `createMcpExpressApp` (from `@modelcontextprotocol/express`) is an Express app pre-configured for MCP servers — it applies `express.json()` for you. Mount your own middleware on it — we add `cors()` so browser-based clients can reach the endpoint.
+- `createMcpHandler` (from `@modelcontextprotocol/server`) wraps your factory into a framework-agnostic MCP request handler. `toNodeHandler` (from `@modelcontextprotocol/node`) adapts that handler's web-standard `fetch` interface to the `(req, res)` shape Express expects.
+- Because `createMcpExpressApp` already parsed the request body via `express.json()`, forward it explicitly: `mcpNodeHandler(req, res, req.body)`. Without that third argument the handler would try to read the request stream itself and find it already drained.
+- `app.all('/mcp', ...)` is the entire route: every request, of any method, goes through the same handler. There's no session header to inspect and no branching on `initialize` versus everything else — `createMcpHandler` works that out from the request itself.
+- Errors inside a tool handler, or a malformed request, are already turned into a proper JSON-RPC error response by `createMcpHandler` — there's no `try`/`catch` to write here.
+
+> **"Binding to 0.0.0.0 without DNS rebinding protection" warning.** `createMcpExpressApp({ host: '0.0.0.0' })` prints this to `stderr` on startup — it's expected here, not an error. Codespace port forwarding needs the server listening on all interfaces, and the warning is just the SDK reminding you that host/origin checks are off outside `localhost`. The [Extras](extras.md) production checklist covers locking this down for a real deployment.
 
 > **Public URL.** `PUBLIC_URL` is unused right now but worth threading through — Part 3 needs it for the OAuth callback and Part 4 needs it for the viewer's CSP.
 
@@ -154,7 +124,7 @@ What's happening:
 }
 ```
 
-When VS Code connects, it issues a `POST` to `/mcp` with no session header. The server allocates a session, returns the ID in the response, and Copilot reuses it for every subsequent message.
+When VS Code connects, it issues a `POST` to `/mcp` to initialize the connection, and every later message from Copilot goes to that same endpoint.
 
 ## Checkpoint
 
@@ -185,12 +155,12 @@ The output is still scoped to the app, not a user — exactly what Part 3 will c
 > 2. Look for port `6274` — VS Code usually detects and adds it automatically when the Inspector starts.
 > 3. Hover over the **Forwarded Address** column and click the globe icon to open it in your browser.
 >
-> The Inspector shows the JSON-RPC traffic (including the `mcp-session-id` header negotiation), lets you invoke tools manually, and is the fastest way to isolate transport bugs from tool bugs.
+> The Inspector shows the raw JSON-RPC traffic, lets you invoke tools manually, and is the fastest way to isolate transport bugs from tool bugs.
 >
 > Note that this command connects to your already-running server at `localhost:3000` — **start the server first** with `npm start`, then run the Inspector command in a second terminal.
 
 ### Additional resources
 
-- [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#streamable-http)
+- [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports#streamable-http)
 - [Express middleware reference](https://expressjs.com/en/4x/api.html)
 - [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
