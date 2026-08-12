@@ -9,44 +9,39 @@ export class UserAuthenticationProvider {
         this.clientId = clientId;
         this.clientSecret = clientSecret;
         this.callbackUrl = callbackUrl;
-        this.cache = {
-            accessToken: null,
-            refreshToken: null,
-            expiresAt: 0
-        };
+        this.credentials = null;
     }
 
     isAuthenticated() {
-        return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
+        return !!this.credentials;
     }
 
-    getAuthorizationUrl() {
-        return this.authClient.authorize(this.clientId, ResponseType.Code, this.callbackUrl, SCOPES);
+    getAuthorizationUrl(state) {
+        return this.authClient.authorize(this.clientId, ResponseType.Code, this.callbackUrl, SCOPES, { state });
     }
 
-    async exchangeAuthCode(code) {
+    async completeLogin(code) {
         const credentials = await this.authClient.getThreeLeggedToken(this.clientId, code, this.callbackUrl, { clientSecret: this.clientSecret });
-        this.cache.accessToken = credentials.access_token;
-        this.cache.refreshToken = credentials.refresh_token;
-        this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
-    }
-
-    async refreshAccessToken(refreshToken) {
-        const credentials = await this.authClient.refreshToken(refreshToken, this.clientId, { clientSecret: this.clientSecret });
-        this.cache.accessToken = credentials.access_token;
-        this.cache.refreshToken = credentials.refresh_token;
-        this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
+        this.credentials = {
+            accessToken: credentials.access_token,
+            refreshToken: credentials.refresh_token,
+            expiresAt: Date.now() + credentials.expires_in * 1000
+        };
     }
 
     async getAccessToken() {
-        if (this.cache.accessToken && this.cache.expiresAt > Date.now()) {
-            return this.cache.accessToken;
-        } else if (this.cache.refreshToken) {
-            await this.refreshAccessToken(this.cache.refreshToken);
-            return this.cache.accessToken;
-        } else {
+        if (!this.isAuthenticated()) {
             throw new Error('Not authenticated');
         }
+        if (this.credentials.expiresAt < Date.now()) {
+            const credentials = await this.authClient.refreshToken(this.credentials.refreshToken, this.clientId, { clientSecret: this.clientSecret });
+            this.credentials = {
+                accessToken: credentials.access_token,
+                refreshToken: credentials.refresh_token,
+                expiresAt: Date.now() + credentials.expires_in * 1000
+            };
+        }
+        return this.credentials.accessToken;
     }
 }
 

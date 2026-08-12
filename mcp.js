@@ -2,26 +2,17 @@ import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
 import VIEWER_HTML from './dist/viewer.js';
+import { PUBLIC_URL, VIEWER_RESOURCE_URI, VIEWER_RESOURCE_MIME_TYPE, VIEWER_DOMAINS, MCP_SERVER_NAME, MCP_SERVER_VERSION } from './config.js';
 
-const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
-const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
-const VIEWER_DOMAINS = [
-    'https://developer.api.autodesk.com',
-    'https://cdn.derivative.autodesk.com',
-    'https://fonts.autodesk.com',
-];
-
-export function createMcpServer(authenticationProvider, publicUrl) {
+export function createMcpServer(authenticationProvider, state) {
     const server = new McpServer({
-        name: 'aps-mcp-server',
-        description: 'MCP server for Autodesk Platform Services',
-        version: '1.0.0'
+        name: MCP_SERVER_NAME,
+        version: MCP_SERVER_VERSION,
     });
-
-    const authUrl = authenticationProvider.getAuthorizationUrl();
 
     const withAuth = (handler) => async (input) => {
         if (!authenticationProvider.isAuthenticated()) {
+            const authUrl = authenticationProvider.getAuthorizationUrl(state);
             return { content: [{ type: 'text', text: `Authentication is required. Please log in at: ${authUrl}` }] };
         }
         return await handler(input);
@@ -93,7 +84,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
                 text: VIEWER_HTML,
                 _meta: {
                     ui: {
-                        domain: publicUrl,
+                        domain: PUBLIC_URL,
                         csp: {
                             resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
                             connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
