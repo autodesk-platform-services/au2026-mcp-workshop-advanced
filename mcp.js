@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
-import VIEWER_HTML from './dist/viewer.js';
+
+const VIEWER_HTML = readFileSync(new URL('./viewer.html', import.meta.url), 'utf-8');
 
 const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
 const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
@@ -10,6 +12,7 @@ const VIEWER_DOMAINS = [
     'https://cdn.derivative.autodesk.com',
     'https://fonts.autodesk.com',
 ];
+const VIEWER_SCRIPT_DOMAINS = ['https://cdn.jsdelivr.net'];
 
 export function createMcpServer(authInfo, publicUrl) {
     const server = new McpServer({
@@ -94,7 +97,7 @@ export function createMcpServer(authInfo, publicUrl) {
                     ui: {
                         domain: publicUrl,
                         csp: {
-                            resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
+                            resourceDomains: [...VIEWER_DOMAINS, ...VIEWER_SCRIPT_DOMAINS, 'blob:', 'data:'],
                             connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
                         },
                     },

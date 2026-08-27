@@ -27,7 +27,7 @@ Writing them by hand is also the point, pedagogically: every value that crosses 
 
 ### One SDK, not two
 
-Every server-side import in this session comes from the **v2** packages — `@modelcontextprotocol/server`, `@modelcontextprotocol/express`, `@modelcontextprotocol/node` — and `proxy.js` is no exception. The older `@modelcontextprotocol/sdk` (v1) is a **dev dependency**, needed only so Vite can bundle the viewer you built in Part 4. Nothing you run on the server touches it.
+Every import in this session comes from the **v2** packages — `@modelcontextprotocol/server`, `@modelcontextprotocol/express`, `@modelcontextprotocol/node` — and `proxy.js` is no exception. The older `@modelcontextprotocol/sdk` (v1) isn't installed at all. It exists in your project only as pre-bundled JavaScript inside the `ext-apps` file the *browser* fetches for the Part 4 viewer, which never reaches Node.
 
 That's worth a moment, because v1 *does* ship an Authorization Server toolkit — `mcpAuthRouter`, built around an `OAuthServerProvider` interface — which would replace maybe fifteen lines of what you're about to write. The cost is holding two SDK generations in your head at once: v1 provider objects on one side of the file, v2 `OAuthError` and `AuthInfo` on the other, with separate and non-interchangeable error classes between them. For fifteen lines of plain Express, that trade isn't worth making.
 
@@ -363,7 +363,7 @@ You should now have:
 - [x] `mcp.js` taking its `authenticationProvider` from `authInfo.extra`, with `withAuth` removed
 - [x] `index.js` mounting `proxy.js`'s router and protecting `/mcp` with `requireBearerAuth`
 - [x] `express` added as a direct dependency (`proxy.js` builds its own `express.Router()`)
-- [x] no server-side file importing `@modelcontextprotocol/sdk` — every import comes from the v2 packages
+- [x] no file importing `@modelcontextprotocol/sdk` — every import comes from the v2 packages
 
 <details>
     <summary>
@@ -502,10 +502,12 @@ export function createOAuthProxy({ issuerUrl, resourceUrl, apsClientId, apsClien
     </summary>
 
 ```js
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
-import VIEWER_HTML from './dist/viewer.js';
+
+const VIEWER_HTML = readFileSync(new URL('./viewer.html', import.meta.url), 'utf-8');
 
 const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
 const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
@@ -514,6 +516,7 @@ const VIEWER_DOMAINS = [
     'https://cdn.derivative.autodesk.com',
     'https://fonts.autodesk.com',
 ];
+const VIEWER_SCRIPT_DOMAINS = ['https://cdn.jsdelivr.net'];
 
 export function createMcpServer(authInfo, publicUrl) {
     const server = new McpServer({
@@ -598,7 +601,7 @@ export function createMcpServer(authInfo, publicUrl) {
                     ui: {
                         domain: publicUrl,
                         csp: {
-                            resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
+                            resourceDomains: [...VIEWER_DOMAINS, ...VIEWER_SCRIPT_DOMAINS, 'blob:', 'data:'],
                             connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
                         },
                     },
@@ -665,7 +668,7 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 
 Start with a plain HTTP walkthrough — it isolates the OAuth mechanics from anything Copilot-specific.
 
-1. Rebuild and restart: `npm run build && npm start`.
+1. Restart the server: `npm start`.
 2. Check the metadata this server now advertises:
 
    ```bash

@@ -13,7 +13,7 @@ Some features worth tackling this way:
 - **Persisted auth.** A server restart clears the shared `UserAuthenticationProvider`'s tokens and forces a fresh login for everyone. Persist the refresh token (encrypted, e.g. Redis/SQLite) and rehydrate it on startup so a restart doesn't log the server out.
 - **Production-grade multi-user auth.** [Part 5](5-client-auth.md) already gets you real multi-user auth by keying `UserAuthenticationProvider` instances off the OAuth proxy's own MCP tokens — but that proxy is explicitly workshop-grade. See [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) below for a production-oriented alternative built on a dedicated identity provider.
 - **Smarter viewer context.** When the user selects an element, look it up via the Model Derivative properties API and feed a richer description back through `updateModelContext`.
-- **Public deployment.** Put the server behind a stable hostname and update the APS app's Callback URL. Containerise it so Vite builds at image-build time and the runtime doesn't need a `dist/` checkout.
+- **Public deployment.** Put the server behind a stable hostname and update the APS app's Callback URL. There's no build step to containerise — `npm install && npm start` is the whole image entrypoint.
 
 ### Suggested workflow
 
@@ -144,7 +144,7 @@ The advanced server is much closer to a real product than the beginner's STDIO b
 | Host/origin validation | `createMcpExpressApp({ host: '0.0.0.0' })`, no allowlist (required for Codespace port forwarding) | Pass `allowedHosts` / `allowedOrigins` (or bind to a fixed hostname) once you have a stable public domain |
 | Viewer CSP | Permissive `connectDomains` | Tighten to only the endpoints the APS Viewer actually uses |
 | Error handling | Errors logged to stderr | Structured logging, alerting, retry/backoff for APS calls |
-| Vite bundle | Built on demand | Built at CI time and shipped as part of the artifact |
+| Viewer dependencies | The `ext-apps` `App` client is fetched from jsDelivr by the browser at runtime, pinned to an exact version | Self-host that file alongside the server, or pin it with Subresource Integrity via an import map, so the panel doesn't depend on a third party's availability |
 | MCP client access | A CIMD-enabled OAuth proxy (`proxy.js`, Part 5) — four hand-written Express routes, deliberately stripped down: no PKCE check, no client authentication at `/token`, no rate limiting, no persistence, no rotation or revocation | Don't ship `proxy.js` as-is. Build a custom proxy with the missing checks and real persistence, or integrate a production identity provider — see [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) above |
 
 > **What's next?** With HTTP transport, 3-legged auth, and embedded UI in place, your server can host real product experiments. A natural follow-up is to add write operations (creating folders, uploading versions) — those need careful scoping and user-visible confirmations, but the building blocks are now all here.

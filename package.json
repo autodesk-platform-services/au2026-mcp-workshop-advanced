@@ -4,7 +4,6 @@
   "description": "APS MCP Workshop — Advanced Session (AU2026)",
   "type": "module",
   "scripts": {
-    "build": "vite build",
     "start": "node index.js"
   },
   "dependencies": {
@@ -16,11 +15,5 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "zod": "^4.4.0"
-  },
-  "devDependencies": {
-    "@modelcontextprotocol/ext-apps": "^1.7.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "vite": "^8.2.2",
-    "vite-plugin-singlefile": "^2.3.3"
   }
 }

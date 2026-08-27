@@ -13,7 +13,7 @@ MCP Apps layers two concepts on top of the standard MCP server, both expressed a
 
 The split mirrors the way browsers separate the page from the data: the resource is loaded once and cached; tool results stream in as the AI works.
 
-> **Design note:** `@modelcontextprotocol/ext-apps` used to ship a `registerAppTool` / `registerAppResource` pair of server-side helpers that did nothing more than set these `_meta` fields for you. As of this writing that package hasn't been updated for MCP SDK v2 yet, so this workshop registers the resource and tool directly with `server.registerTool` / `server.registerResource` and sets `_meta` by hand — one less dependency, and it reads as plain MCP once you know the two fields to set. `@modelcontextprotocol/ext-apps` is still a real dependency of the *viewer bundle*, narrowed to the one thing that isn't optional: the browser-side `App` client `viewer.js` uses to talk back to the host. That's why it sits in `devDependencies` — Vite inlines it into `dist/viewer.js`, and the server itself never imports it.
+> **Design note:** `@modelcontextprotocol/ext-apps` used to ship a `registerAppTool` / `registerAppResource` pair of server-side helpers that did nothing more than set these `_meta` fields for you. As of this writing that package hasn't been updated for MCP SDK v2 yet, so this workshop registers the resource and tool directly with `server.registerTool` / `server.registerResource` and sets `_meta` by hand — one less dependency, and it reads as plain MCP once you know the two fields to set. The only piece of `ext-apps` this workshop still uses is the browser-side `App` client, which the viewer loads straight from a CDN — so `ext-apps` isn't an npm dependency of this project at all, and nothing on the server imports it.
 
 ### What the viewer needs
 
@@ -23,13 +23,15 @@ The APS Viewer is a JavaScript library. It needs:
 - An access token to download model derivatives.
 - A "URN" — actually a base64 of the design's storage URN — that identifies the model.
 
-We'll bundle the entire viewer HTML (plus our small wrapper script) into a single inlined file so it can be served as a resource with no extra HTTP requests on our side.
+Because the resource body is a single HTML string, everything our own code contributes — the wrapper script and its handful of styles — lives inline in that one file. There is no bundler and no build step: `mcp.js` reads `viewer.html` from disk at startup and serves it verbatim.
+
+> **Design note:** the one thing that would normally force a bundler here is a bare module specifier — `import { App } from '@modelcontextprotocol/ext-apps'` — which browsers cannot resolve. But `ext-apps` publishes a prebuilt, dependency-inlined ES module at `dist/src/app-with-deps.js` (its `./app-with-deps` export), with zod and the v1 MCP SDK already baked in. The viewer imports that file directly from a CDN, so the specifier resolves in the browser and the whole toolchain becomes unnecessary. Earlier versions of this workshop ran Vite plus `vite-plugin-singlefile` to inline the same code; dropping them removed four devDependencies and an `npm run build` step that was easy to forget.
 
 ## Step 1: Viewer UI
 
-Create the three files under `ui/`:
+Create a single file in the project root:
 
-`ui/viewer.html`:
+`viewer.html`:
 
 ```html
 <!DOCTYPE html>
@@ -40,137 +42,83 @@ Create the three files under `ui/`:
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.min.css" type="text/css">
   <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.min.js"></script>
-  <link rel="stylesheet" href="./viewer.css">
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      min-height: 500px;
+      overflow: hidden;
+    }
+
+    #viewer {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
 </head>
 
 <body>
   <div id="viewer"></div>
-  <script type="module" src="./viewer.js"></script>
+  <script type="module">
+    import { App } from 'https://cdn.jsdelivr.net/npm/@modelcontextprotocol/ext-apps@1.7.5/dist/src/app-with-deps.js';
+
+    const app = new App({ name: 'Design Viewer', version: '1.0.0' });
+    app.ontoolresult = ({ structuredContent: { urn, config } = {} }) => {
+      if (urn && config) loadModel(urn, config);
+    };
+    app.connect();
+    app.requestDisplayMode({ mode: 'pip' });
+
+    let viewerInitializedPromise = null;
+
+    function loadModel(urn, config) {
+      if (!viewerInitializedPromise) {
+        viewerInitializedPromise = new Promise((resolve) => {
+          Autodesk.Viewing.Initializer(config, () => {
+            const viewer = new Autodesk.Viewing.GuiViewer3D(document.getElementById('viewer'));
+            viewer.start();
+            viewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, () => {
+              const ids = viewer.getSelection();
+              const text = ids.length ? `User selected objects with IDs: ${ids.join(', ')}` : 'No objects selected';
+              app.updateModelContext({ content: [{ type: 'text', text }] });
+            });
+            resolve(viewer);
+          });
+        });
+      }
+      return viewerInitializedPromise.then(viewer => {
+        Autodesk.Viewing.Document.load(
+          'urn:' + urn,
+          (doc) => viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry()),
+          (errorCode, errorMessage, errors) => console.error('Failed to load document:', errorCode, errorMessage, errors)
+        );
+      });
+    }
+  </script>
 </body>
 
 </html>
 ```
 
-`ui/viewer.css`:
-
-```css
-html,
-body {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    min-height: 500px;
-    overflow: hidden;
-}
-
-#viewer {
-    width: 100%;
-    height: 100%;
-}
-```
-
-`ui/viewer.js`:
-
-```js
-import { App } from '@modelcontextprotocol/ext-apps';
-
-const app = new App({ name: 'Design Viewer', version: '1.0.0' });
-app.ontoolresult = ({ structuredContent: { urn, config } = {} }) => {
-    if (urn && config) loadModel(urn, config);
-};
-app.connect();
-app.requestDisplayMode({ mode: 'pip' });
-
-let viewerInitializedPromise = null;
-
-function loadModel(urn, config) {
-    if (!viewerInitializedPromise) {
-        viewerInitializedPromise = new Promise((resolve) => {
-            Autodesk.Viewing.Initializer(config, () => {
-                const viewer = new Autodesk.Viewing.GuiViewer3D(document.getElementById('viewer'));
-                viewer.start();
-                viewer.addEventListener(Autodesk.Viewing.SELECTION_CHANGED_EVENT, () => {
-                    const ids = viewer.getSelection();
-                    const text = ids.length ? `User selected objects with IDs: ${ids.join(', ')}` : 'No objects selected';
-                    app.updateModelContext({ content: [{ type: 'text', text }] });
-                });
-                resolve(viewer);
-            });
-        });
-    }
-    return viewerInitializedPromise.then(viewer => {
-        Autodesk.Viewing.Document.load(
-            'urn:' + urn,
-            (doc) => viewer.loadDocumentNode(doc, doc.getRoot().getDefaultGeometry()),
-            (errorCode, errorMessage, errors) => console.error('Failed to load document:', errorCode, errorMessage, errors)
-        );
-    });
-}
-```
-
-Two things worth highlighting in `viewer.js`:
+Two things worth highlighting in the inline script:
 
 - `app.ontoolresult` runs whenever the AI invokes the `preview-design` tool. The `structuredContent` field we return from the server carries the access token, viewer config, and design URN.
 - The `SELECTION_CHANGED_EVENT` handler calls `app.updateModelContext(...)`, which feeds the user's current selection back into the AI's context window. The model can then reason about specific elements ("what's the area of the selected slab?") without the user having to type IDs.
 
-## Step 2: Vite build
-
-Create `vite.config.js` at the project root:
-
-```js
-import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { defineConfig } from 'vite';
-import { viteSingleFile } from 'vite-plugin-singlefile';
-
-export default defineConfig({
-    root: './ui',
-    plugins: [
-        viteSingleFile(),
-        {
-            name: 'emit-viewer-module',
-            closeBundle() {
-                const html = readFileSync(join('dist', 'viewer.html'), 'utf-8');
-                writeFileSync(join('dist', 'viewer.js'), `export default ${JSON.stringify(html)};\n`);
-            },
-        },
-    ],
-    build: {
-        rollupOptions: {
-            input: './ui/viewer.html',
-        },
-        outDir: '../dist',
-        emptyOutDir: false,
-    },
-});
-```
-
-What this does:
-
-1. `viteSingleFile()` inlines every script and stylesheet `viewer.html` references into one HTML file.
-2. The custom `emit-viewer-module` plugin reads that final HTML, JSON-stringifies it, and writes it to `dist/viewer.js` as `export default "...";`.
-3. The MCP server then imports `dist/viewer.js` and serves the string as the resource body — no need to add static-file routes to Express.
-
-Build it now — and remember to re-run this command whenever you change anything under `ui/`:
-
-```bash
-npm run build
-```
-
-You should see `dist/viewer.html` and `dist/viewer.js` appear.
-
-> **Required before `npm start`.** The server's `mcp.js` imports `./dist/viewer.js` at startup. If you skip the build (or pull a fresh clone and run `npm start` straight away), Node will throw `Cannot find module './dist/viewer.js'`. Always run `npm run build` at least once before starting the server. The <kbd>F5</kbd> debug configuration from Part 2 doesn't build either — it runs `index.js` directly.
-
-## Step 3: Register the resource and tool
+## Step 2: Register the resource and tool
 
 Extend `mcp.js` to declare the viewer resource and the `preview-design` tool. Update the imports and constants at the top of the file:
 
 ```js
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
-import VIEWER_HTML from './dist/viewer.js';
+
+const VIEWER_HTML = readFileSync(new URL('./viewer.html', import.meta.url), 'utf-8');
 
 const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
 const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
@@ -179,6 +127,7 @@ const VIEWER_DOMAINS = [
     'https://cdn.derivative.autodesk.com',
     'https://fonts.autodesk.com',
 ];
+const VIEWER_SCRIPT_DOMAINS = ['https://cdn.jsdelivr.net'];
 ```
 
 `VIEWER_RESOURCE_MIME_TYPE` is the MIME type MCP Apps uses to mark a resource as an app UI. The `VIEWER_DOMAINS` list ends up in the resource's Content Security Policy so the embedded viewer can call the APS APIs it depends on.
@@ -230,7 +179,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
                     ui: {
                         domain: publicUrl,
                         csp: {
-                            resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
+                            resourceDomains: [...VIEWER_DOMAINS, ...VIEWER_SCRIPT_DOMAINS, 'blob:', 'data:'],
                             connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
                         },
                     },
@@ -247,11 +196,11 @@ What's new versus a normal tool:
 
 - `_meta.ui.resourceUri` tells the client which app resource to surface alongside this tool's result — that's the entire contract between a tool and its UI.
 - The handler is wrapped in the same `withAuth` helper used by the other tools, so an unauthenticated session gets the login URL instead of a crash.
-- The handler returns **both** `structuredContent` (consumed by `viewer.js` via `ontoolresult`) and a plain text `content` block (shown to the user / model as a confirmation).
+- The handler returns **both** `structuredContent` (consumed by `viewer.html` via `ontoolresult`) and a plain text `content` block (shown to the user / model as a confirmation).
 - The access token is fetched first, then the item tip. The token is short-lived and is included in `structuredContent.config` so the viewer can authenticate its own requests to the derivative service.
 - The resource's read callback receives the request `uri` as a `URL` — echo it back on `contents[0].uri` (MCP requires each content entry to carry its own URI) and set `mimeType` again on the content entry alongside the resource-level one.
 
-## Step 4: Update the entry point
+## Step 3: Update the entry point
 
 `index.js` already builds the shared auth provider and hands the factory to `createMcpHandler`. Add `PUBLIC_URL` as a second argument to the `createMcpServer` call so the viewer resource knows which origin to whitelist:
 
@@ -266,8 +215,7 @@ That's the only change in `index.js`.
 
 You should now have:
 
-- [x] `ui/viewer.html`, `ui/viewer.js`, `ui/viewer.css`
-- [x] `vite.config.js` and a populated `dist/` directory after `npm run build`
+- [x] `viewer.html` — one self-contained document, no build step
 - [x] `mcp.js` registering the viewer resource and `preview-design` tool
 - [x] `index.js` passing `PUBLIC_URL` to `createMcpServer`
 
@@ -277,10 +225,12 @@ You should now have:
     </summary>
 
 ```js
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
-import VIEWER_HTML from './dist/viewer.js';
+
+const VIEWER_HTML = readFileSync(new URL('./viewer.html', import.meta.url), 'utf-8');
 
 const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
 const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
@@ -289,6 +239,7 @@ const VIEWER_DOMAINS = [
     'https://cdn.derivative.autodesk.com',
     'https://fonts.autodesk.com',
 ];
+const VIEWER_SCRIPT_DOMAINS = ['https://cdn.jsdelivr.net'];
 
 export function createMcpServer(authenticationProvider, publicUrl) {
     const server = new McpServer({
@@ -374,7 +325,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
                     ui: {
                         domain: publicUrl,
                         csp: {
-                            resourceDomains: [...VIEWER_DOMAINS, 'blob:', 'data:'],
+                            resourceDomains: [...VIEWER_DOMAINS, ...VIEWER_SCRIPT_DOMAINS, 'blob:', 'data:'],
                             connectDomains: [...VIEWER_DOMAINS, 'wss://cdn.derivative.autodesk.com'],
                         },
                     },
@@ -437,44 +388,9 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 
 </details>
 
-<details>
-    <summary>
-        Reference: full <code>vite.config.js</code>
-    </summary>
-
-```js
-import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { defineConfig } from 'vite';
-import { viteSingleFile } from 'vite-plugin-singlefile';
-
-export default defineConfig({
-    root: './ui',
-    plugins: [
-        viteSingleFile(),
-        {
-            name: 'emit-viewer-module',
-            closeBundle() {
-                const html = readFileSync(join('dist', 'viewer.html'), 'utf-8');
-                writeFileSync(join('dist', 'viewer.js'), `export default ${JSON.stringify(html)};\n`);
-            },
-        },
-    ],
-    build: {
-        rollupOptions: {
-            input: './ui/viewer.html',
-        },
-        outDir: '../dist',
-        emptyOutDir: false,
-    },
-});
-```
-
-</details>
-
 ### Try it out
 
-1. Rebuild and restart: `npm run build && npm start`.
+1. Restart the server: `npm start`.
 2. In Copilot Chat (agent mode, with the HTTP server registered), ask for a design preview, for example:
 
    > Open one of my Forma designs in the viewer.
@@ -482,7 +398,7 @@ export default defineConfig({
 3. Copilot may chain calls: `list-hubs-projects` → `list-folder-contents` → `preview-design`. Approve any tool prompts.
 4. After `preview-design` runs, the viewer panel appears with the model loaded. Select an object — the chat now knows what's selected and can answer follow-up questions about it.
 
-> **Cache busting.** If you rebuild the viewer while a Copilot session is open, restart the MCP server so the new `dist/viewer.js` is imported and the next session loads the fresh resource.
+> **Cache busting.** `mcp.js` reads `viewer.html` once at startup, so restart the MCP server after editing the viewer — otherwise the next session still gets the old resource.
 
 ### Where next?
 
