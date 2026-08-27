@@ -126,6 +126,37 @@ What's happening:
 
 When VS Code connects, it issues a `POST` to `/mcp` to initialize the connection, and every later message from Copilot goes to that same endpoint.
 
+## Step 4: Add a debug launch configuration
+
+`npm start` runs the server, but it gives you no breakpoints. Add `.vscode/launch.json` so you can start the server under VS Code's Node debugger instead:
+
+```json
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch MCP Server",
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "program": "${workspaceFolder}/index.js",
+            "envFile": "${workspaceFolder}/.env"
+        }
+    ]
+}
+```
+
+Press <kbd>F5</kbd> (or pick **Launch MCP Server** in the **Run and Debug** panel) to start the server with the debugger attached. Breakpoints in `index.js`, `mcp.js`, and `aps.js` all hit, which is far more useful than `console.log` once Part 3 adds an OAuth flow with several redirects.
+
+> **The `envFile` line.** It loads `APS_CLIENT_ID` and `APS_CLIENT_SECRET` from a gitignored `.env` file at the project root — useful when you run locally, because the debugger doesn't inherit the variables you exported in a terminal. In a Codespace your secrets are already in the environment, and the file doesn't exist. VS Code refuses to launch when `envFile` points at a missing file, so **delete that line if you're working in a Codespace.**
+
+> **One server at a time.** Both `npm start` and the debugger bind port `3000`. If you get `EADDRINUSE`, stop whichever one is already running.
+
 ## Checkpoint
 
 You should now have:
@@ -133,10 +164,11 @@ You should now have:
 - [x] `mcp.js` carried over from the beginner project (no changes)
 - [x] `index.js` running an Express app at `/mcp`
 - [x] `.vscode/mcp.json` pointing Copilot at the HTTP endpoint
+- [x] `.vscode/launch.json` with a **Launch MCP Server** debug configuration
 
 ### Try it out
 
-1. Start the server: `npm start`. You should see `MCP server listening on http://localhost:3000/mcp`.
+1. Start the server: `npm start`, or press <kbd>F5</kbd> to start it under the debugger. You should see `MCP server listening on http://localhost:3000/mcp`.
 2. Open VS Code, register the server from `.vscode/mcp.json`, and open Copilot Chat in agent mode.
 3. Ask: *"What Forma projects do I have access to?"*
 4. Copilot calls `list-hubs-projects` and returns the hubs visible to your APS *application* (the same data you saw in the beginner workshop, since the auth model hasn't changed yet).
@@ -164,3 +196,4 @@ The output is still scoped to the app, not a user — exactly what Part 3 will c
 - [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports#streamable-http)
 - [Express middleware reference](https://expressjs.com/en/4x/api.html)
 - [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
+- [VS Code Node.js debugging](https://code.visualstudio.com/docs/nodejs/nodejs-debugging)

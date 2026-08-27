@@ -11,7 +11,7 @@ Some features worth tackling this way:
 - **Issues tool.** Add a tool that lists open issues on a project using the [ACC Issues API](https://aps.autodesk.com/en/docs/acc/v1/overview/field-guide/issues/). Use the selection event from the viewer to filter issues by element.
 - **Multi-model preview.** Extend `preview-design` to accept an array of designs and aggregate them in a single viewer scene with `loadDocumentNode` per model.
 - **Persisted auth.** A server restart clears the shared `UserAuthenticationProvider`'s tokens and forces a fresh login for everyone. Persist the refresh token (encrypted, e.g. Redis/SQLite) and rehydrate it on startup so a restart doesn't log the server out.
-- **Real multi-user auth.** Follow through on the design note in [Part 3](3-user-auth.md#one-shared-provider-for-now) — see [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) below for a full reference implementation.
+- **Production-grade multi-user auth.** [Part 5](5-client-auth.md) already gets you real multi-user auth by keying `UserAuthenticationProvider` instances off the OAuth proxy's own MCP tokens — but that proxy is explicitly workshop-grade. See [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) below for a production-oriented alternative built on a dedicated identity provider.
 - **Smarter viewer context.** When the user selects an element, look it up via the Model Derivative properties API and feed a richer description back through `updateModelContext`.
 - **Public deployment.** Put the server behind a stable hostname and update the APS app's Callback URL. Containerise it so Vite builds at image-build time and the runtime doesn't need a `dist/` checkout.
 
@@ -99,6 +99,8 @@ Review checklist before /tasks:
 
 Part 3 leaves one question deliberately unanswered: *which human is behind this HTTP request?* Its `UserAuthenticationProvider` is shared by the whole process because there's no stable, per-request identity to key anything else on — see the [design note](3-user-auth.md#one-shared-provider-for-now). [**aps-mcp-auth0-example**](https://github.com/autodesk-platform-services/aps-mcp-auth0-example) is a reference implementation that answers that question: it adds the Layer 1 handshake this workshop skips, using [Auth0](https://auth0.com) as the authorization server, on top of the same APS MCP server shape you've just built.
 
+[Part 5](5-client-auth.md)'s `proxy.js` answers the same question a different way — APS itself as the sole identity provider, no third-party tenant to set up — at the cost of being explicitly workshop-grade rather than production-ready (see its Theory section). The two approaches solve the same Layer 1 problem; which one fits a real deployment depends on whether you already run a dedicated identity provider.
+
 ### Architecture
 
 The two OAuth layers stay independent end to end:
@@ -143,6 +145,6 @@ The advanced server is much closer to a real product than the beginner's STDIO b
 | Viewer CSP | Permissive `connectDomains` | Tighten to only the endpoints the APS Viewer actually uses |
 | Error handling | Errors logged to stderr | Structured logging, alerting, retry/backoff for APS calls |
 | Vite bundle | Built on demand | Built at CI time and shipped as part of the artifact |
-| MCP client access | Open `/mcp` endpoint | A CIMD-enabled authorization server in front of the MCP server, issuing Layer 1 tokens the server validates on every request — see [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) above |
+| MCP client access | A CIMD-enabled OAuth proxy (`proxy.js`, Part 5) — four hand-written Express routes, deliberately stripped down: no PKCE check, no client authentication at `/token`, no rate limiting, no persistence, no rotation or revocation | Don't ship `proxy.js` as-is. Build a custom proxy with the missing checks and real persistence, or integrate a production identity provider — see [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) above |
 
 > **What's next?** With HTTP transport, 3-legged auth, and embedded UI in place, your server can host real product experiments. A natural follow-up is to add write operations (creating folders, uploading versions) — those need careful scoping and user-visible confirmations, but the building blocks are now all here.

@@ -11,31 +11,30 @@ const VIEWER_DOMAINS = [
     'https://fonts.autodesk.com',
 ];
 
-export function createMcpServer(authenticationProvider, publicUrl) {
+export function createMcpServer(authInfo, publicUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
 
-    const authUrl = authenticationProvider.getAuthorizationUrl();
-
-    const withAuth = (handler) => async (input) => {
-        if (!authenticationProvider.isAuthenticated()) {
-            return { content: [{ type: 'text', text: `Authentication is required. Please log in at: ${authUrl}` }] };
-        }
-        return await handler(input);
-    };
+    // By the time this factory runs, `requireBearerAuth` (see index.js) has already
+    // rejected any request without a valid MCP token, so every tool handler below can
+    // assume it's authenticated. The proxy attaches this request's APS session to
+    // `authInfo.extra` as a bound `getAccessToken()` — the same interface
+    // `UserAuthenticationProvider` exposes, so the data helpers imported above don't
+    // need to know or care that the token now comes from the OAuth proxy.
+    const authenticationProvider = authInfo.extra.apsAuthenticationProvider;
 
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        withAuth(async () => {
+        async () => {
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        })
+        }
     );
 
     server.registerTool(
@@ -48,10 +47,10 @@ export function createMcpServer(authenticationProvider, publicUrl) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        withAuth(async ({ hubId, projectId, folderId }) => {
+        async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        })
+        }
     );
 
     server.registerTool(
@@ -67,7 +66,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
                 ui: { resourceUri: VIEWER_RESOURCE_URI },
             },
         },
-        withAuth(async ({ projectId, designId, region = 'US' }) => {
+        async ({ projectId, designId, region = 'US' }) => {
             const accessToken = await authenticationProvider.getAccessToken();
             const tip = await getItemTip(projectId, designId, authenticationProvider);
             const config = {
@@ -79,7 +78,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
                 structuredContent: { name: tip.name, urn: tip.derivativeUrn, config },
                 content: [{ type: 'text', text: `Here is the preview of ${tip.name}.` }],
             };
-        })
+        }
     );
 
     server.registerResource(

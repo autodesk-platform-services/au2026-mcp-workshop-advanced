@@ -13,7 +13,7 @@ MCP Apps layers two concepts on top of the standard MCP server, both expressed a
 
 The split mirrors the way browsers separate the page from the data: the resource is loaded once and cached; tool results stream in as the AI works.
 
-> **Design note:** `@modelcontextprotocol/ext-apps` used to ship a `registerAppTool` / `registerAppResource` pair of server-side helpers that did nothing more than set these `_meta` fields for you. As of this writing that package hasn't been updated for MCP SDK v2 yet, so this workshop registers the resource and tool directly with `server.registerTool` / `server.registerResource` and sets `_meta` by hand — one less dependency, and it reads as plain MCP once you know the two fields to set. `@modelcontextprotocol/ext-apps` is still a real dependency of this project, just narrowed to the one thing that isn't optional: the browser-side `App` client `viewer.js` uses to talk back to the host.
+> **Design note:** `@modelcontextprotocol/ext-apps` used to ship a `registerAppTool` / `registerAppResource` pair of server-side helpers that did nothing more than set these `_meta` fields for you. As of this writing that package hasn't been updated for MCP SDK v2 yet, so this workshop registers the resource and tool directly with `server.registerTool` / `server.registerResource` and sets `_meta` by hand — one less dependency, and it reads as plain MCP once you know the two fields to set. `@modelcontextprotocol/ext-apps` is still a real dependency of the *viewer bundle*, narrowed to the one thing that isn't optional: the browser-side `App` client `viewer.js` uses to talk back to the host. That's why it sits in `devDependencies` — Vite inlines it into `dist/viewer.js`, and the server itself never imports it.
 
 ### What the viewer needs
 
@@ -160,7 +160,7 @@ npm run build
 
 You should see `dist/viewer.html` and `dist/viewer.js` appear.
 
-> **Required before `npm start`.** The server's `mcp.js` imports `./dist/viewer.js` at startup. If you skip the build (or pull a fresh clone and run `npm start` straight away), Node will throw `Cannot find module './dist/viewer.js'`. Always run `npm run build` at least once before starting the server.
+> **Required before `npm start`.** The server's `mcp.js` imports `./dist/viewer.js` at startup. If you skip the build (or pull a fresh clone and run `npm start` straight away), Node will throw `Cannot find module './dist/viewer.js'`. Always run `npm run build` at least once before starting the server. The <kbd>F5</kbd> debug configuration from Part 2 doesn't build either — it runs `index.js` directly.
 
 ## Step 3: Register the resource and tool
 
@@ -486,7 +486,7 @@ export default defineConfig({
 
 ### Where next?
 
-You've now got an HTTP MCP server that authenticates as a real Autodesk user via 3-legged OAuth, with an embedded 3D viewer on top — the core mechanics behind any AI assistant that acts on Autodesk Platform Services on a user's behalf. The [Extras](extras.md) page covers spec-driven development with GitHub Spec-Kit (recommended once changes start touching multiple layers at once), plus pointers for going further: real per-user auth and a checklist for hardening this server toward production use.
+You've now got an HTTP MCP server that authenticates as a real Autodesk user via 3-legged OAuth, with an embedded 3D viewer on top — the core mechanics behind any AI assistant that acts on Autodesk Platform Services on a user's behalf. One gap remains: `/mcp` itself is still wide open to any client. [Part 5](5-client-auth.md) closes it with a small OAuth proxy of your own. After that, the [Extras](extras.md) page covers spec-driven development with GitHub Spec-Kit (recommended once changes start touching multiple layers at once), plus pointers for going further: real per-user auth and a checklist for hardening this server toward production use.
 
 ### Additional resources
 

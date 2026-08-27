@@ -25,9 +25,13 @@ That's a deliberate simplification, not an oversight. It keeps this part of the 
 >
 > Once you have that stable, per-request user ID from Layer 1, per-user APS auth (**Layer 2**, what this part of the tutorial builds) becomes a lookup instead of a guess: keep a `Map<userId, UserAuthenticationProvider>`, resolve the current request's user ID from its validated Layer 1 token, and get-or-create that user's provider from the map. The MCP session ID is no longer part of the equation — sessions can come and go, but a user's `UserAuthenticationProvider` (and their APS refresh token) persists as long as the process does, keyed by an identity that doesn't change on reconnect. Running a real, CIMD-enabled authorization server is out of scope for this workshop — see [Extras](extras.md) for pointers if you want to take this further.
 
+[Part 5](5-client-auth.md) builds exactly this Layer 1 piece — a small, self-hosted OAuth proxy in front of `/mcp` that uses APS itself as the authorization server, instead of a third-party identity provider.
+
 ### Login URL elicitation — and the fallback
 
 MCP defines an "elicit input" capability that lets a server ask the client (Copilot) to open a URL on the user's behalf. Today, GitHub Copilot does **not** implement URL elicitation. So instead of relying on it, we return the authorization URL as plain text inside the first tool result and let the user click it manually. The mechanism is crude but works in every MCP client.
+
+[Part 5](5-client-auth.md) removes this fallback entirely — once `/mcp` itself requires OAuth, an MCP client that supports standard authorization discovery opens a normal browser sign-in prompt on its own, with no manually-clicked link required.
 
 ## Step 1: User authentication provider
 
