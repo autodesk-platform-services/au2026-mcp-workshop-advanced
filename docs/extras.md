@@ -10,8 +10,8 @@ Some features worth tackling this way:
 
 - **Issues tool.** Add a tool that lists open issues on a project using the [ACC Issues API](https://aps.autodesk.com/en/docs/acc/v1/overview/field-guide/issues/). Use the selection event from the viewer to filter issues by element.
 - **Multi-model preview.** Extend `preview-design` to accept an array of designs and aggregate them in a single viewer scene with `loadDocumentNode` per model.
-- **Persisted auth.** A server restart clears the shared `UserAuthenticationProvider`'s tokens and forces a fresh login for everyone. Persist the refresh token (encrypted, e.g. Redis/SQLite) and rehydrate it on startup so a restart doesn't log the server out.
-- **Production-grade multi-user auth.** [Part 5](5-client-auth.md) already gets you real multi-user auth by keying `UserAuthenticationProvider` instances off the OAuth proxy's own MCP tokens — but that proxy is explicitly workshop-grade. See [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) below for a production-oriented alternative built on a dedicated identity provider.
+- **Persisted auth.** A server restart drops every `UserAuthenticationProvider` along with the proxy's in-memory session maps, so every client has to sign in again. Persist the refresh token (encrypted, e.g. Redis/SQLite) against a durable user identity, and rehydrate on startup so a restart doesn't sign everyone out.
+- **Production-grade multi-user auth.** [Part 5](5-client-auth.md) gives each MCP token its own `UserAuthenticationProvider`, which is enough to stop two chats sharing one login — but it keys those sessions on the token it minted rather than a stable user identity, and the proxy itself is explicitly workshop-grade. See [Real per-user auth with Auth0](#real-per-user-auth-with-auth0-layer-1) below for a production-oriented alternative built on a dedicated identity provider.
 - **Smarter viewer context.** When the user selects an element, look it up via the Model Derivative properties API and feed a richer description back through `updateModelContext`.
 - **Public deployment.** Put the server behind a stable hostname and update the APS app's Callback URL. There's no build step to containerise — `npm install && npm start` is the whole image entrypoint.
 
@@ -40,17 +40,20 @@ Below is the kind of input each slash command expects. Don't copy these verbatim
 **`/constitution`** — invariants this codebase already enforces:
 
 ```text
-- index.js stays thin: it only wires Express, the MCP handler, and the auth
-  provider. New features go in aps.js (APS calls), mcp.js (tool registration),
-  or web/ (viewer UI).
-- Access tokens never leave UserAuthenticationProvider. Tools receive a
-  token via the provider, never via globals or request bodies.
+- index.js stays thin: it only wires Express, the MCP handler, the OAuth
+  proxy router, and the bearer-auth guard on /mcp. New features go in aps.js
+  (APS calls), mcp.js (tool registration), or viewer.html (viewer UI).
+- Refresh tokens never leave UserAuthenticationProvider, and no APS token is
+  ever logged or persisted. Tools reach tokens only through getAccessToken().
+  The one token that leaves the process is the short-lived access token in the
+  preview-design payload, which the viewer needs to fetch derivatives.
 - aps.js must not import from mcp.js. APS client code stays transport-agnostic
   so it can be reused outside MCP.
 - PUBLIC_URL must match the APS app's Callback URL exactly, including scheme
   and port. Any new redirect-bearing flow goes through the same value.
-- The viewer (web/) only talks to the server over the existing MCP session;
-  it never holds an APS access token directly.
+- viewer.html never calls APS management APIs itself. It consumes the
+  preview-design payload and the short-lived token that payload carries,
+  and nothing else.
 ```
 
 **`/specify`** — feature description (the *what* and *why*, not the *how*):
@@ -85,7 +88,7 @@ Expected touch points:
 - mcp.js: register `list-issues` tool taking { projectId, useSelection? }.
   When useSelection is true, read the current selection from the session's
   model context (set by updateModelContext) and pass it as elementUrn.
-- No changes to index.js. No changes to web/ in this iteration.
+- No changes to index.js. No changes to viewer.html in this iteration.
 
 Review checklist before /tasks:
 - Token still comes from UserAuthenticationProvider, not a parameter.
@@ -137,9 +140,9 @@ The advanced server is much closer to a real product than the beginner's STDIO b
 | Area | Workshop state | Production requirement |
 |---|---|---|
 | Transport state | Stateless `createMcpHandler` + `toNodeHandler` wiring, no session map | Fine as-is for request/response tools; add a distributed `EventStore` only if you introduce resumable SSE streams or server-initiated push |
-| APS identity | One shared `UserAuthenticationProvider` for the whole process | `Map<userId, UserAuthenticationProvider>`, keyed by the user ID a Layer 1 authorization server puts on each request |
+| APS identity | One `UserAuthenticationProvider` per MCP token minted by `proxy.js` — isolated per authorization, but with no stable user behind it | `Map<userId, UserAuthenticationProvider>`, keyed by the user ID a Layer 1 authorization server asserts on each request |
 | Refresh tokens | Held in memory only | Encrypted persistence so users don't re-auth on restart |
-| Multi-tenant safety | One process trust boundary, one shared APS identity | Per-user isolation via the identity map above, plus rate limiting, audit logs |
+| Multi-tenant safety | Per-token isolation, no durable user identity, no per-user limits | Per-user isolation via the identity map above, plus rate limiting, audit logs |
 | Callback URL | `http://localhost:3000/auth/callback` | HTTPS-only public URL registered in APS |
 | Host/origin validation | `createMcpExpressApp({ host: '0.0.0.0' })`, no allowlist (required for Codespace port forwarding) | Pass `allowedHosts` / `allowedOrigins` (or bind to a fixed hostname) once you have a stable public domain |
 | Viewer CSP | Permissive `connectDomains` | Tighten to only the endpoints the APS Viewer actually uses |

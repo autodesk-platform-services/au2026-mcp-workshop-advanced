@@ -77,9 +77,9 @@ You'll end up with the following files by the end of the workshop. Everything si
   mcp.json               # updated in Part 2
   launch.json            # added in Part 2
 viewer.html              # self-contained viewer page, added in Part 4
-aps.js                   # from beginner — extended in Part 2
+aps.js                   # from beginner — extended in Parts 3 & 4
 mcp.js                   # from beginner — extended in Parts 3, 4 & 5
-index.js                 # rewritten in Part 3, extended in Part 5
+index.js                 # rewritten in Part 2 — updated in Parts 3, 4 & 5
 proxy.js                 # added in Part 5
 package.json
 ```

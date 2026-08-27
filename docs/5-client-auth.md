@@ -8,7 +8,9 @@ In this section you'll add `proxy.js`, a small OAuth Authorization Server that s
 
 Part 3's design note named the gap this part closes: MCP defines a **Layer 1** handshake between the MCP client and the MCP server, separate from **Layer 2** — whatever the server does on the user's behalf, which is the 3-legged APS flow you already built. Until now, this workshop has only implemented Layer 2. `/mcp` itself has never checked who — or what — is calling it.
 
-Closing Layer 1 also finishes something Part 3 deliberately left unfinished: real multi-user support. Once every request carries a validated MCP token, `Map<userId, UserAuthenticationProvider>` (the shape Part 3's design note already described) stops being a hypothetical — this part builds exactly that map, keyed by the MCP token this proxy mints.
+Closing Layer 1 gets you most of the way to the multi-user story Part 3 deferred — though not all of it. Once every request carries a validated MCP token, each authorization gets a `UserAuthenticationProvider` of its own instead of one shared process-wide, so two Copilot chats no longer share a login.
+
+What this proxy still lacks is the *stable* identity Part 3's design note described. It keys sessions on the token it minted, not on a `sub` claim, so the same person signing in twice ends up with two independent APS sessions — and all of them vanish when the process restarts. A real `Map<userId, UserAuthenticationProvider>` needs an authorization server that can assert *who* the user is; see [Extras](extras.md) for a version built on a dedicated identity provider.
 
 ### Why you write the OAuth endpoints yourself
 
@@ -694,7 +696,7 @@ Start with a plain HTTP walkthrough — it isolates the OAuth mechanics from any
    Expect a `401` with a `WWW-Authenticate: Bearer ...resource_metadata="..."` header, not a normal MCP response.
 
 5. In VS Code, reconnect the MCP server (or start a fresh Copilot Chat) and ask the same question you did in Part 3: *"What Forma projects do I have access to?"* This time, VS Code detects the `401` challenge itself, discovers this server's Authorization Server metadata, and opens a browser window straight to the APS sign-in page — no login URL pasted into the chat.
-6. Sign in, land on the same *"Login successful!"* page from Part 3, and watch the tool call complete with your projects.
+6. Sign in with your Autodesk account. There is no *"Login successful!"* page this time — that route lived in `index.js`, and Step 10 removed it. `proxy.js` completes the APS exchange, hands the MCP client an authorization code, and redirects the browser to the client's own redirect page (`https://vscode.dev/redirect` for the web build). VS Code swaps that code at `/token`, and the tool call completes with your projects.
 7. Open a second, fresh Copilot Chat. Unlike Part 3, this one does **not** automatically see your login — each MCP client authorization is now independent, keyed by its own MCP token rather than one shared process-wide provider.
 
 > **CIMD in practice.** Whether you see the CIMD path exercised depends on how your MCP client identifies itself — some clients still use classic Dynamic Client Registration, which this proxy doesn't support (only CIMD). If sign-in fails with `invalid_request` and *"Unknown client_id or redirect_uri"* instead of redirecting to APS, that's Step 5's guard rejecting the request: check the `client_id` your client sent (it must be an `https://` URL) and confirm the `redirect_uri` it sent appears in the document that URL serves. VS Code's MCP client and `npx @modelcontextprotocol/inspector` both support CIMD.

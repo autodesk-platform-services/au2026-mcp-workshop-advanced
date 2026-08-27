@@ -13,7 +13,7 @@ The advanced workshop replaces parts of those files. You'll see the original sni
 
 ## Autodesk Platform Services
 
-You need an APS application with a **Callback URL** configured — without it, the 3-legged OAuth flow in Part 2 won't work.
+You need an APS application with a **Callback URL** configured — without it, the 3-legged OAuth flow in Part 3 won't work.
 
 1. Go to [https://aps.autodesk.com](https://aps.autodesk.com) and sign in.
 2. Open **My Apps** and either reuse the application from the beginner workshop or create a new **Traditional Web App**.

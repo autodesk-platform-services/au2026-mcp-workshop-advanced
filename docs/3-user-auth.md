@@ -25,7 +25,7 @@ That's a deliberate simplification, not an oversight. It keeps this part of the 
 >
 > Once you have that stable, per-request user ID from Layer 1, per-user APS auth (**Layer 2**, what this part of the tutorial builds) becomes a lookup instead of a guess: keep a `Map<userId, UserAuthenticationProvider>`, resolve the current request's user ID from its validated Layer 1 token, and get-or-create that user's provider from the map. The MCP session ID is no longer part of the equation — sessions can come and go, but a user's `UserAuthenticationProvider` (and their APS refresh token) persists as long as the process does, keyed by an identity that doesn't change on reconnect. Running a real, CIMD-enabled authorization server is out of scope for this workshop — see [Extras](extras.md) for pointers if you want to take this further.
 
-[Part 5](5-client-auth.md) builds exactly this Layer 1 piece — a small, self-hosted OAuth proxy in front of `/mcp` that uses APS itself as the authorization server, instead of a third-party identity provider.
+[Part 5](5-client-auth.md) builds this Layer 1 piece — a small, self-hosted OAuth proxy in front of `/mcp` that uses APS itself as the authorization server, instead of a third-party identity provider.
 
 ### Login URL elicitation — and the fallback
 
@@ -80,7 +80,7 @@ export class UserAuthenticationProvider {
 }
 ```
 
-Each instance creates its own `AuthenticationClient`. Unlike the beginner's `AppAuthenticationProvider`, there is no module-level shared client — each user session is independent.
+The shape is deliberately close to the beginner's `AppAuthenticationProvider`: same per-instance `AuthenticationClient`, same in-memory cache, same `getAccessToken()`. The constructor takes one extra argument — `callbackUrl` — because a 3-legged flow has to tell Autodesk where to send the user back.
 
 Key differences from the beginner provider:
 
