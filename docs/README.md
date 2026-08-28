@@ -9,3 +9,5 @@ Starting from the small MCP server the [beginner session](https://github.com/aut
 - Replace the local **STDIO** transport with **Streamable HTTP** over Express, and run it from a GitHub Codespace with a public URL.
 - Swap **2-legged** application authentication for **3-legged** user OAuth, and put an OAuth proxy of your own in front of `/mcp` so an MCP client has to sign in — with the same Autodesk account — before it can call a single tool.
 - Add a `preview-design` MCP tool that returns an embedded **APS Viewer** panel, letting the AI show designs in 3D and read back what the user selects.
+
+![Screenshot](screenshot.png)

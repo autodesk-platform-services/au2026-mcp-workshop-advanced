@@ -509,6 +509,7 @@ Common failure states:
 
 - **`invalid_request` / "Unknown client_id or redirect_uri" instead of a redirect to Autodesk.** The `/authorize` guard rejected the request. The `client_id` must be an `https://` URL, and the `redirect_uri` must appear in the document that URL serves. Some MCP clients still use classic dynamic client registration, which this proxy doesn't support; VS Code and `npx @modelcontextprotocol/inspector` both support CIMD.
 - **Autodesk rejects the login with a redirect URI mismatch.** `PUBLIC_URL` and the APS app's **Callback URL** disagree. Compare them character for character.
+- **Autodesk sign-in succeeds but VS Code keeps waiting, or the page it lands on says "Unauthorized: No valid session for this codespace".** The browser editor failed to take the redirect back, so the authorization code never reached the client. Press <kbd>F1</kbd>, run **Codespaces: Open in VS Code Desktop**, and sign in again from there — the desktop app receives the redirect on your own machine. A fresh Codespace also clears it.
 - **`Not authenticated` from a tool.** The server restarted, taking every session with it. Reconnect the MCP server in VS Code to sign in again.
 
 ### Additional resources

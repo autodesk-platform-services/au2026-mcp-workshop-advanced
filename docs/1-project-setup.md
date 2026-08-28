@@ -31,7 +31,9 @@ Add the secrets *before* creating the Codespace. If you add them afterwards, reb
 
 From your repository on GitHub, click **Code → Codespaces → Create codespace on main**. It opens VS Code in the browser with the repository checked out and Node.js already installed.
 
-You can also open the same Codespace in desktop VS Code (**Codespaces: Open in VS Code Desktop** from the command palette) if you prefer.
+You can also connect to the same Codespace from the desktop app — press <kbd>F1</kbd> and run **Codespaces: Open in VS Code Desktop**. The terminal, the debugger and the **Ports** panel behave the same either way.
+
+> **Working locally instead?** Skip this step and open the repository folder in VS Code the usual way.
 
 ## Step 4: Update package.json
 

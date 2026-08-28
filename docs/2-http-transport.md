@@ -59,16 +59,15 @@ What this does:
   "servers": {
     "APS MCP Server (Advanced)": {
       "type": "http",
-      "url": "http://localhost:3000/mcp"
+      "url": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}/mcp"
     }
   }
 }
 ```
 
-`localhost:3000` is correct even in a Codespace: Copilot runs inside the same environment as the server.
+The URL is built from two variables Codespaces sets automatically, and resolves to the forwarded address of port `3000`. Use that rather than `localhost:3000`: Part 3 publishes the same address as the server's identity in its OAuth metadata, and the client needs to reach the server where that metadata says it is.
 
-> [!CAUTION]
-> **TODO** verify this claim ^
+> **Working locally?** Use `http://localhost:3000/mcp` — those two variables only exist in a Codespace.
 
 ## Step 3: Setup debugging
 
@@ -94,10 +93,7 @@ What this does:
 }
 ```
 
-The `env` block builds the public URL from the two variables Codespaces sets automatically, so the debugger gets the same value your terminal will get in Step 4.
-
-> [!CAUTION]
-> **TODO** verify this claim ^
+The `env` block builds the public URL from the same two variables, so the debugger gets the value your terminal will get in Step 4.
 
 `APS_CLIENT_ID` and `APS_CLIENT_SECRET` are already in the Codespace environment, so the debugger inherits them.
 
