@@ -14,20 +14,12 @@ const VIEWER_DOMAINS = [
 ];
 const VIEWER_SCRIPT_DOMAINS = ['https://cdn.jsdelivr.net'];
 
-export function createMcpServer(authInfo, publicUrl) {
+export function createMcpServer(authenticationProvider, publicUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
         description: 'MCP server for Autodesk Platform Services',
         version: '1.0.0'
     });
-
-    // By the time this factory runs, `requireBearerAuth` (see index.js) has already
-    // rejected any request without a valid MCP token, so every tool handler below can
-    // assume it's authenticated. The proxy attaches this request's APS session to
-    // `authInfo.extra` as a bound `getAccessToken()` — the same interface
-    // `UserAuthenticationProvider` exposes, so the data helpers imported above don't
-    // need to know or care that the token now comes from the OAuth proxy.
-    const authenticationProvider = authInfo.extra.apsAuthenticationProvider;
 
     server.registerTool(
         'list-hubs-projects',

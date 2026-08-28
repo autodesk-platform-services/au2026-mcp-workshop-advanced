@@ -1,33 +1,41 @@
 # Part 1: Project Setup
 
-In this section you'll prepare a fresh project (or branch of the beginner project) with the dependencies the advanced session needs. There are only four additions beyond the beginner set, all of them server-side: `express`, `cors`, and the two MCP adapter packages that put the server on HTTP. The embedded viewer in Part 4 needs no build tooling at all.
+In this section you'll get the starting code into a Codespace and install the dependencies the advanced session needs.
 
-## Step 1: Starting point
+## Step 1: Get the starting code
 
-The advanced session builds directly on the beginner MCP server. You have two ways to get that starting code:
+The starting point is the finished code of the beginner session: [github.com/autodesk-platform-services/au2026-mcp-workshop-beginner](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner).
 
-- **Reuse your beginner project**, *as long as you completed every step of the beginner session.* If your beginner repo already has the finished `aps.js`, `mcp.js`, `index.js`, and `.vscode/mcp.json` from the end of Part 3 of the beginner session, branch it (e.g. an `advanced` branch) and evolve it in place.
-- **Clone the reference implementation.** If you didn't finish the beginner session — or only got partway through — start from the finished beginner code at [github.com/autodesk-platform-services/au2026-mcp-workshop-beginner](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner). Clone it, then continue here.
+Open it on GitHub and click **Use this template → Create a new repository** (or fork it) so you have a repository of your own to work in. If you already have that code in a repository, create a branch — for example `advanced` — and work there.
 
-Either way, add the same two Codespace secrets (or local environment variables) as in the beginner session:
+> [!CAUTION]
+> **TODO**: verify this step ^
 
-| Name | Value |
-| --- | --- |
-| `APS_CLIENT_ID` | Your APS application client ID |
-| `APS_CLIENT_SECRET` | Your APS application client secret |
+## Step 2: Store your APS credentials
 
-## Step 2: Codespace (or local)
+Your server reads its APS credentials from environment variables, and Codespaces injects them for you from account-level secrets.
 
-Start a Codespace as in the beginner session, or work locally with Node.js 20+ if you prefer. Open the project in VS Code so Copilot can talk to your server later.
+1. Go to [github.com/settings/codespaces](https://github.com/settings/codespaces).
+2. Under **Codespace user secrets**, add two secrets and give your new repository access to both:
 
-> **Port forwarding (read this if you're using a Codespace).** When you start the server in Part 2 it listens on port `3000`, and the OAuth callback in Part 3 needs to be reachable *from your local browser*. Since the browser runs on your laptop and the server runs in the Codespace, `http://localhost:3000/auth/callback` only works if the Codespace forwards port `3000` back to your machine — which it does by default once the server is running. You have two options:
->
-> - **Easiest:** keep the default `localhost:3000` callback. In the Codespace **Ports** panel, set port `3000` visibility to **Public** (or **Private** if you'll complete OAuth in the same browser that's signed into the Codespace).
-> - **Public hostname:** use the forwarded URL the Codespace assigns (e.g. `https://<codespace>-3000.app.github.dev`). Register `https://<codespace>-3000.app.github.dev/auth/callback` as an additional Callback URL in your APS app, and set `PUBLIC_URL` to `https://<codespace>-3000.app.github.dev` when you start the server in Part 3.
+   | Name | Value |
+   | --- | --- |
+   | `APS_CLIENT_ID` | Your APS application client ID |
+   | `APS_CLIENT_SECRET` | Your APS application client secret |
 
-## Step 3: Dependencies
+Add the secrets *before* creating the Codespace. If you add them afterwards, rebuild the Codespace or stop and restart it so the new values reach the environment.
 
-Replace your `package.json` with the advanced version:
+> **Working locally instead?** Everything in this workshop also runs on a local machine with Node.js 20+. Export the same two variables in your shell before starting the server. Codespaces is the path the instructions assume, and a few later steps call out the local difference.
+
+## Step 3: Open a Codespace
+
+From your repository on GitHub, click **Code → Codespaces → Create codespace on main**. It opens VS Code in the browser with the repository checked out and Node.js already installed.
+
+You can also open the same Codespace in desktop VS Code (**Codespaces: Open in VS Code Desktop** from the command palette) if you prefer.
+
+## Step 4: Dependencies
+
+Replace `package.json` with the advanced version:
 
 ```json
 {
@@ -51,49 +59,48 @@ Replace your `package.json` with the advanced version:
 }
 ```
 
-What's new compared to the beginner session:
+Four dependencies are new, all of them server-side:
 
 | Dependency | Why |
 | --- | --- |
-| `@modelcontextprotocol/express` | The `createMcpExpressApp` factory that pre-configures Express for MCP |
-| `@modelcontextprotocol/node` | The `toNodeHandler` adapter that bridges the fetch-based MCP handler to Express's `(req, res)` signature |
-| `cors` | The HTTP transport needs CORS so the viewer can call APS from the embedded panel |
-| `express` | Part 5's `proxy.js` builds its own `express.Router()` for the OAuth endpoints — a direct dependency now, not just a transitive one pulled in by `@modelcontextprotocol/express` |
+| `express` | The web server the MCP endpoint and the OAuth routes are mounted on |
+| `@modelcontextprotocol/express` | Express integration for MCP: app setup, bearer-token guard, OAuth metadata routes |
+| `@modelcontextprotocol/node` | Adapts the MCP request handler to Node's request/response objects |
+| `cors` | Lets browser-based clients call the HTTP endpoint |
 
-> **Note:** there are no `devDependencies` and no build step — every dependency listed above is imported by code you actually run. The embedded viewer you build in Part 4 is a single self-contained `viewer.html` that `mcp.js` reads from disk, and the one browser-side library it needs (`@modelcontextprotocol/ext-apps`) is loaded from a CDN by the browser rather than bundled by you. That means `npm install && npm start` is the whole setup: no `npm run build` to forget, and no second copy of the MCP SDK in your tree.
-
-Install everything:
+Install everything from the VS Code terminal:
 
 ```bash
 npm install
-```
-
-## Step 4: Folder layout
-
-You'll end up with the following files by the end of the workshop. Everything sits in the project root, so there are no folders to create up front.
-
-```text
-.vscode/
-  mcp.json               # updated in Part 2
-  launch.json            # added in Part 2
-viewer.html              # self-contained viewer page, added in Part 4
-aps.js                   # from beginner — extended in Parts 3 & 4
-mcp.js                   # from beginner — extended in Parts 3, 4 & 5
-index.js                 # rewritten in Part 2 — updated in Parts 3, 4 & 5
-proxy.js                 # added in Part 5
-package.json
 ```
 
 ## Checkpoint
 
 You should now have:
 
-- [x] A repository (new or branched) with `APS_CLIENT_ID` / `APS_CLIENT_SECRET` available
+- [x] Your own repository with the starting code, open in a Codespace
+- [x] `APS_CLIENT_ID` and `APS_CLIENT_SECRET` in the environment
 - [x] The advanced `package.json` and a successful `npm install`
-- [x] The beginner `aps.js`, `mcp.js`, and `index.js` ready to be edited
+
+```text
+.vscode/
+  mcp.json
+aps.js
+mcp.js
+index.js
+package.json
+```
+
+Confirm the credentials arrived:
+
+```bash
+echo $APS_CLIENT_ID
+```
+
+If that prints nothing, revisit Step 2 — every later part depends on it.
 
 ### Additional resources
 
 - [Express documentation](https://expressjs.com/)
+- [GitHub Codespaces secrets](https://docs.github.com/en/codespaces/managing-your-codespaces/managing-your-account-specific-secrets-for-github-codespaces)
 - [MCP TypeScript SDK v2 migration guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/upgrade-to-v2.md)
-- [MCP ext-apps package](https://www.npmjs.com/package/@modelcontextprotocol/ext-apps)

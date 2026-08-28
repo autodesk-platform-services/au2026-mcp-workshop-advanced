@@ -21,7 +21,7 @@ const { router: authProxyRouter, tokenVerifier } = createOAuthProxy({
     apsClientSecret: APS_CLIENT_SECRET,
     callbackUrl: CALLBACK_URL,
 });
-const mcpHandler = createMcpHandler((ctx) => createMcpServer(ctx.authInfo, PUBLIC_URL));
+const mcpHandler = createMcpHandler((ctx) => createMcpServer(ctx.authInfo.extra.apsAuthenticationProvider, PUBLIC_URL));
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());

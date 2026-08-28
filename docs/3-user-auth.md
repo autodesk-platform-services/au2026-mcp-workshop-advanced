@@ -1,41 +1,34 @@
-# Part 3: User Authentication
+# Part 3: Authentication
 
-In this section you'll swap the 2-legged `AppAuthenticationProvider` for a `UserAuthenticationProvider` that holds a real user's access + refresh tokens. To keep the workshop focused on the OAuth mechanics rather than session bookkeeping, a single shared `UserAuthenticationProvider` instance serves the whole process — exactly like `AppAuthenticationProvider` did in Part 2 — and a new `/auth/callback` route on the Express app completes the OAuth dance. The data helpers (`getHubsProjects`, `getFolderContents`) stay exactly as they are — both providers expose the same `getAccessToken()` interface, which is the whole reason the provider pattern exists.
+In this section you'll make the server act on behalf of a real Autodesk user instead of as the application, and lock `/mcp` so only a signed-in MCP client can reach it. By the end, both hops of the conversation are authenticated: the client signs in to your server, and your server calls APS on the user's behalf.
 
 ## Theory
 
-### Why 3-legged?
+### Two hops, two OAuth flows
 
-2-legged tokens are issued *to your application*. They are great for service-to-service automation, but they cannot see anything a Forma user owns unless the hub administrator explicitly delegates it. As soon as the AI should "act as the user" — show their projects, their permissions, files they personally have access to — you need a **3-legged** token.
+There are two independent trust boundaries here:
 
-The flow is:
+- **Your server → APS.** A 3-legged OAuth flow that gets a token representing *a signed-in Autodesk user*, so the tools return that user's hubs, projects and files.
+- **MCP client → your server.** A separate OAuth flow that answers "who is calling `/mcp`?". Right now the endpoint is wide open to anyone who can reach the port, which is a problem the moment it holds a user's session.
 
-1. Send the user to `https://developer.api.autodesk.com/authentication/v2/authorize` with your client ID, the requested scopes, a redirect URL, and a `state` value.
-2. The user signs in and consents. Autodesk redirects back to your callback URL with a one-time `code`.
-3. Your server exchanges the `code` (plus client secret) for an `access_token` and a `refresh_token`.
-4. The access token expires after about an hour. Use the refresh token to mint new ones without prompting the user again.
+The 3-legged flow runs like this:
 
-### One shared provider (for now)
+1. Send the user to Autodesk's authorization page with your client ID, the scopes you want, and a callback URL.
+2. The user signs in and consents. Autodesk redirects back to the callback URL with a one-time `code`.
+3. Your server exchanges the `code` for an access token and a refresh token.
+4. The access token is only valid for a limited time (typically an hour). The refresh token mints new ones without prompting the user again.
 
-In Part 2 the whole process shared a single `AppAuthenticationProvider`. This workshop keeps that shape for `UserAuthenticationProvider` too: one instance, constructed once in `index.js`, closed over by every `McpServer` the `createMcpHandler` factory builds. Whoever completes the OAuth login populates the tokens that *every* request then sees through `getAccessToken()`.
+### Why the server needs its own OAuth endpoints
 
-That's a deliberate simplification, not an oversight. It keeps this part of the tutorial about the 3-legged OAuth flow itself — authorize, redirect, exchange, refresh — without also teaching a second, unrelated problem: how to know *which* human is behind a given HTTP request. Real multi-user support needs an answer to that question, and bolting it on with nothing but a random MCP session ID (which resets every time a client reconnects) would be more confusing than illuminating.
+An MCP client that hits a protected `/mcp` expects a `401` telling it where to sign in, and then expects to identify itself to that authorization server without anyone registering it by hand. APS can do neither: it has never heard of your MCP client and won't issue tokens to it.
 
-> **Design note: getting to real multi-user auth.** MCP already has a name for the piece this workshop skips: the [MCP Authorization spec](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) describes a **Layer 1** handshake between the MCP client and the MCP server, separate from whatever APIs the server calls on the user's behalf. In that model, an MCP server is an OAuth 2.1 resource server sitting in front of its own authorization server — one that supports [Client ID Metadata Documents (CIMD)](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization) so MCP clients can identify themselves without manual pre-registration. The authorization server issues the MCP client a token carrying a stable user identity (a `sub` claim), and the MCP server validates that token on every request.
->
-> Once you have that stable, per-request user ID from Layer 1, per-user APS auth (**Layer 2**, what this part of the tutorial builds) becomes a lookup instead of a guess: keep a `Map<userId, UserAuthenticationProvider>`, resolve the current request's user ID from its validated Layer 1 token, and get-or-create that user's provider from the map. The MCP session ID is no longer part of the equation — sessions can come and go, but a user's `UserAuthenticationProvider` (and their APS refresh token) persists as long as the process does, keyed by an identity that doesn't change on reconnect. Running a real, CIMD-enabled authorization server is out of scope for this workshop — see [Extras](extras.md) for pointers if you want to take this further.
+So our server takes on the role itself. It advertises its own authorization and token endpoints, runs the user through Autodesk's real sign-in page behind the scenes, and hands the MCP client its own generated credentials — while the actual APS tokens stay on the server. That's what `proxy.js` does in Step 2.
 
-[Part 5](5-client-auth.md) builds this Layer 1 piece — a small, self-hosted OAuth proxy in front of `/mcp` that uses APS itself as the authorization server, instead of a third-party identity provider.
-
-### Login URL elicitation — and the fallback
-
-MCP defines an "elicit input" capability that lets a server ask the client (Copilot) to open a URL on the user's behalf. Today, GitHub Copilot does **not** implement URL elicitation. So instead of relying on it, we return the authorization URL as plain text inside the first tool result and let the user click it manually. The mechanism is crude but works in every MCP client.
-
-[Part 5](5-client-auth.md) removes this fallback entirely — once `/mcp` itself requires OAuth, an MCP client that supports standard authorization discovery opens a normal browser sign-in prompt on its own, with no manually-clicked link required.
+> **Design note: this is a workshop stand-in, not production-ready.** The proxy you're about to write trades away most of what a real authorization server does: no persistence, no PKCE verification, no client authentication at the token endpoint, no rate limiting, no revocation, no rotation on refresh. All state lives in memory. That's a deliberate trade of robustness for a file you can read in one sitting — don't ship it as-is. A real deployment either builds a purpose-fit proxy with the missing checks, or integrates a dedicated identity provider (Auth0, Okta, Entra ID, …). [Extras](extras.md) links a full reference implementation built on Auth0.
 
 ## Step 1: User authentication provider
 
-Open `aps.js` and replace the imports + `AppAuthenticationProvider` class with the user-level equivalent:
+In `aps.js`, update the imports and replace `AppAuthenticationProvider` with a user-level provider:
 
 ```js
 import { AuthenticationClient, Scopes, ResponseType } from '@aps_sdk/authentication';
@@ -56,8 +49,15 @@ export class UserAuthenticationProvider {
         };
     }
 
-    isAuthenticated() {
-        return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
+    getAuthorizationUrl() {
+        return this.authClient.authorize(this.clientId, ResponseType.Code, this.callbackUrl, SCOPES);
+    }
+
+    async exchangeAuthCode(code) {
+        const credentials = await this.authClient.getThreeLeggedToken(this.clientId, code, this.callbackUrl, { clientSecret: this.clientSecret });
+        this.cache.accessToken = credentials.access_token;
+        this.cache.refreshToken = credentials.refresh_token;
+        this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
     }
 
     async refreshAccessToken(refreshToken) {
@@ -80,122 +80,205 @@ export class UserAuthenticationProvider {
 }
 ```
 
-The shape is deliberately close to the beginner's `AppAuthenticationProvider`: same per-instance `AuthenticationClient`, same in-memory cache, same `getAccessToken()`. The constructor takes one extra argument — `callbackUrl` — because a 3-legged flow has to tell Autodesk where to send the user back.
+The class covers the three steps of the 3-legged flow that touch APS. `getAuthorizationUrl` builds the sign-in link (it makes no network call), `exchangeAuthCode` turns the one-time code into a token pair, and `getAccessToken` hands out the cached access token, refreshing it silently when it has expired.
 
-Key differences from the beginner provider:
+Two properties carry the rest of the design:
 
-- The cache holds **both** an access token (short-lived) and a refresh token (long-lived).
-- `isAuthenticated()` checks that the token both exists and hasn't expired. The MCP server calls this to decide whether to return a login URL instead of running the tool.
-- `getAccessToken()` returns the cached token, refreshes it silently using the refresh token, or throws `Not authenticated` if the user hasn't completed OAuth yet.
+- The cache holds an access token *and* a refresh token, so a session survives the token expiration without another sign-in.
+- `getAccessToken()` is the only method anything outside this class calls for a token, and it returns the same thing the 2-legged provider did. `getHubsProjects` and `getFolderContents` therefore need no changes — they still receive `{ authenticationProvider }` and let the SDK ask for a token when it needs one.
 
-## Step 2: Authorization URL & code exchange
+## Step 2: OAuth proxy
 
-Add these two methods to `UserAuthenticationProvider`:
-
-```js
-getAuthorizationUrl() {
-    return this.authClient.authorize(this.clientId, ResponseType.Code, this.callbackUrl, SCOPES);
-}
-
-async exchangeAuthCode(code) {
-    const credentials = await this.authClient.getThreeLeggedToken(this.clientId, code, this.callbackUrl, { clientSecret: this.clientSecret });
-    this.cache.accessToken = credentials.access_token;
-    this.cache.refreshToken = credentials.refresh_token;
-    this.cache.expiresAt = Date.now() + credentials.expires_in * 1000;
-}
-```
-
-- `getAuthorizationUrl()` builds the redirect URL using the `callbackUrl` stored at construction time. There's no `state` parameter to thread through, because there's only one provider instance for the callback to populate — see the design note above for what a real, per-user version of this would need.
-- `exchangeAuthCode(code)` swaps the one-time `code` for access + refresh tokens and stores them directly in `this.cache`. The callback URL is already on the instance, so `index.js` only needs to pass the code.
-
-## Step 3: Keep the data helpers, add `getItemTip`
-
-The existing `getHubsProjects` and `getFolderContents` functions are unchanged — both `AppAuthenticationProvider` and `UserAuthenticationProvider` satisfy the `{ getAccessToken() }` interface that `DataManagementClient` expects.
-
-While you're here, add one more helper that Part 4 will need: `getItemTip` returns the latest version's name and derivative URN for a design.
+This step is a shortcut. Every other file in the workshop grows a few lines at a time, but an OAuth flow has no useful halfway point — until all four routes exist, none of them do anything you can test. So create `proxy.js` at the project root, paste the whole file in, and read the tour that follows it. One factory, four routes, about 100 lines:
 
 ```js
-export async function getItemTip(projectId, itemId, authenticationProvider) {
-    const client = new DataManagementClient({ authenticationProvider });
-    const { data } = await client.getItemTip(projectId, itemId);
-    return {
-        name: data.attributes.displayName,
-        derivativeUrn: data.relationships.derivatives.data.id
-    };
+// Demo-only OAuth proxy for this workshop: in-memory, no PKCE or client authentication, and missing most other production checks — replace it with a purpose-built implementation or a third-party identity provider before shipping.
+
+import express from 'express';
+import { randomBytes } from 'node:crypto';
+import { mcpAuthMetadataRouter } from '@modelcontextprotocol/express';
+import { OAuthError, OAuthErrorCode } from '@modelcontextprotocol/server';
+import { UserAuthenticationProvider } from './aps.js';
+
+const TOKEN_TTL_MS = 60 * 60 * 1000;
+const generateToken = () => randomBytes(32).toString('base64url');
+
+const cimdCache = new Map();
+async function resolveClient(clientId) {
+    if (typeof clientId !== 'string' || !clientId.startsWith('https://')) return undefined;
+    if (!cimdCache.has(clientId)) {
+        cimdCache.set(clientId, await fetch(clientId).then((r) => r.json()));
+    }
+    return cimdCache.get(clientId);
 }
-```
 
-## Step 4: Login-gated tool handlers
+function isRegisteredRedirectUri(requested, client) {
+    return typeof requested === 'string' && (client.redirect_uris ?? []).includes(requested);
+}
 
-A 3-legged session has no tokens until the user has logged in. The MCP tools need to detect that and respond with the authorization URL instead of crashing with `Not authenticated`.
+export function createOAuthProxy({ issuerUrl, resourceUrl, apsClientId, apsClientSecret, callbackUrl }) {
+    const pendingAuthorizations = new Map();
+    const issuedCodes = new Map();
+    const sessions = new Map();
+    const refreshTokens = new Map();
 
-Update `mcp.js` so the factory computes the login URL itself and wraps each handler in a small `withAuth` helper that short-circuits to a login prompt when the session isn't authenticated yet:
+    function issueTokens(clientId, apsProvider) {
+        const accessToken = generateToken();
+        const refreshToken = generateToken();
+        sessions.set(accessToken, { clientId, apsProvider, expiresAt: Date.now() + TOKEN_TTL_MS });
+        refreshTokens.set(refreshToken, { clientId, apsProvider });
+        return { access_token: accessToken, token_type: 'bearer', expires_in: TOKEN_TTL_MS / 1000, refresh_token: refreshToken };
+    }
 
-```js
-import { McpServer } from '@modelcontextprotocol/server';
-import { z } from 'zod';
-import { getHubsProjects, getFolderContents } from './aps.js';
+    const router = express.Router();
+    router.use(express.urlencoded({ extended: false }));
 
-export function createMcpServer(authenticationProvider) {
-    const server = new McpServer({
-        name: 'aps-mcp-server',
-        description: 'MCP server for Autodesk Platform Services',
-        version: '1.0.0'
+    router.use(mcpAuthMetadataRouter({
+        oauthMetadata: {
+            issuer: issuerUrl.href,
+            authorization_endpoint: new URL('/authorize', issuerUrl).href,
+            token_endpoint: new URL('/token', issuerUrl).href,
+            response_types_supported: ['code'],
+            grant_types_supported: ['authorization_code', 'refresh_token'],
+            code_challenge_methods_supported: ['S256'],
+            token_endpoint_auth_methods_supported: ['none'],
+            client_id_metadata_document_supported: true,
+        },
+        resourceServerUrl: resourceUrl,
+    }));
+
+    router.get('/authorize', async (req, res) => {
+        const { client_id: clientId, redirect_uri: redirectUri, state } = req.query;
+        const client = await resolveClient(clientId);
+        if (!client || !isRegisteredRedirectUri(redirectUri, client)) {
+            res.status(400).json({ error: 'invalid_request', error_description: 'Unknown client_id or redirect_uri.' });
+            return;
+        }
+        const correlationId = generateToken();
+        const apsProvider = new UserAuthenticationProvider(apsClientId, apsClientSecret, callbackUrl);
+        pendingAuthorizations.set(correlationId, { clientId, redirectUri, state, apsProvider });
+        res.redirect(`${apsProvider.getAuthorizationUrl()}&state=${correlationId}`);
     });
 
-    const authUrl = authenticationProvider.getAuthorizationUrl();
+    router.get('/auth/callback', async (req, res) => {
+        const { code, state: correlationId } = req.query;
+        try {
+            const { clientId, redirectUri, state, apsProvider } = pendingAuthorizations.get(correlationId);
+            pendingAuthorizations.delete(correlationId);
+            await apsProvider.exchangeAuthCode(code);
 
-    const withAuth = (handler) => async (input) => {
-        if (!authenticationProvider.isAuthenticated()) {
-            return { content: [{ type: 'text', text: `Authentication is required. Please log in at: ${authUrl}` }] };
+            const mcpCode = generateToken();
+            issuedCodes.set(mcpCode, { clientId, apsProvider });
+
+            const redirectUrl = new URL(redirectUri);
+            redirectUrl.searchParams.set('code', mcpCode);
+            if (state) redirectUrl.searchParams.set('state', state);
+            res.redirect(redirectUrl.toString());
+        } catch (err) {
+            console.error('Auth callback error:', err);
+            res.status(500).send('Authentication failed.');
         }
-        return await handler(input);
+    });
+
+    router.post('/token', (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        const { grant_type: grantType, code, refresh_token: refreshToken } = req.body;
+        if (grantType !== 'authorization_code' && grantType !== 'refresh_token') {
+            res.status(400).json({ error: 'unsupported_grant_type', error_description: `Unsupported grant type: ${grantType}.` });
+            return;
+        }
+        const grant = grantType === 'authorization_code' ? issuedCodes.get(code) : refreshTokens.get(refreshToken);
+        if (!grant) {
+            res.status(400).json({ error: 'invalid_grant', error_description: 'Unknown or expired grant.' });
+            return;
+        }
+        if (grantType === 'authorization_code') issuedCodes.delete(code);
+        res.json(issueTokens(grant.clientId, grant.apsProvider));
+    });
+
+    return {
+        router,
+        tokenVerifier: {
+            async verifyAccessToken(token) {
+                const session = sessions.get(token);
+                if (!session) throw new OAuthError(OAuthErrorCode.InvalidToken, 'Invalid token.');
+                return {
+                    token,
+                    clientId: session.clientId,
+                    scopes: [],
+                    expiresAt: Math.floor(session.expiresAt / 1000),
+                    extra: { apsAuthenticationProvider: { getAccessToken: () => session.apsProvider.getAccessToken() } },
+                };
+            },
+        },
     };
-
-    server.registerTool(
-        'list-hubs-projects',
-        {
-            description: 'Lists all hubs and their projects available to the authenticated user.'
-        },
-        withAuth(async () => {
-            const hubs = await getHubsProjects(authenticationProvider);
-            return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        })
-    );
-
-    server.registerTool(
-        'list-folder-contents',
-        {
-            description: 'Lists the contents of a folder in a project, or top-level folders if no folder ID is provided.',
-            inputSchema: z.object({
-                hubId: z.string().describe('Hub ID.'),
-                projectId: z.string().describe('Project ID.'),
-                folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
-            })
-        },
-        withAuth(async ({ hubId, projectId, folderId }) => {
-            const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
-            return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        })
-    );
-
-    return server;
 }
 ```
 
-The factory now computes its own login URL via `authenticationProvider.getAuthorizationUrl()` — that method only builds a URL string (no network call), so recomputing it every time `createMcpHandler` calls the factory is cheap, and `index.js` never needs to know the login URL exists. The `withAuth` wrapper guards every tool in one place: when the session isn't yet authenticated it returns a short message containing the login URL for the AI to show the user; otherwise it runs the real handler.
+Read the rest of this step as a tour of what you just pasted, not as a template to copy into a product. The comment on the first line is the point: this file stands in for an identity provider so that the workshop has one, and the Design note above lists what it leaves out. Anything beyond a demo needs a purpose-built proxy or a real IdP in its place.
 
-## Step 5: Update the entry point
+### The routes, in the order a login visits them
 
-Swap `AppAuthenticationProvider` for `UserAuthenticationProvider` and add the `/auth/callback` route that completes the OAuth exchange. Nothing about the `createMcpHandler` / `toNodeHandler` wiring from Part 2 changes — it never depended on which auth provider the factory closes over:
+| Route | Who calls it | What it does |
+| --- | --- | --- |
+| the two `.well-known` documents | the MCP client, after a `401` | advertise the endpoints below |
+| `/authorize` | the MCP client's browser | identify the client, then redirect to Autodesk's sign-in page |
+| `/auth/callback` | APS, after the user signs in | complete the APS exchange, hand the client a one-time code |
+| `/token` | the MCP client | swap that code — or a refresh token — for tokens *this* server minted |
+
+`mcpAuthMetadataRouter` serves the two discovery documents for you: `/.well-known/oauth-protected-resource/mcp` (derived from `resourceServerUrl`), and `/.well-known/oauth-authorization-server`, serving the `oauthMetadata` object verbatim.
+
+`/authorize` creates a fresh `UserAuthenticationProvider` per MCP client login, stashes it under a random correlation ID, and sends the browser to Autodesk — reusing the callback URL you registered in Part 2. Note there are two `state` values in play. The MCP client's own `state` is stored untouched, to be handed back at the end of the flow; the `state` on the APS URL is our correlation ID, which is how `/auth/callback` finds its way back to the pending login.
+
+`/auth/callback` is the hinge between the two OAuth flows. It completes the APS OAuth flow, caches the APS credentials internally, mints *its own* authorization code, and redirects the browser back to the original callback URL specified by the MCP client.
+
+`/token` is where the MCP client can exchange the temporary code from our proxy server for an "MCP token". This token is completely separate from the cached APS credentials, exactly as the MCP specification requires.
+
+### Who identifies the client
+
+An MCP client's `client_id` is an HTTPS URL it controls, pointing at a small JSON document that describes it — including the `redirect_uris` it is allowed to use. `resolveClient` fetches that URL the first time it sees it, caches the result, and treats it as the client's registration. That's [Client ID Metadata Documents (CIMD)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00), and it's why nothing here needs manual pre-registration.
+
+### What the four maps hold
+
+| Map | Key | Value |
+| --- | --- | --- |
+| `pendingAuthorizations` | correlation ID | `{ clientId, redirectUri, state, apsProvider }` — a login in flight at APS |
+| `issuedCodes` | MCP authorization code | `{ clientId, apsProvider }` — redeemable once, at `/token` |
+| `sessions` | MCP access token | `{ clientId, apsProvider, expiresAt }` |
+| `refreshTokens` | MCP refresh token | `{ clientId, apsProvider }` |
+
+### Handing the session to the tools
+
+`tokenVerifier` is the piece the bearer-auth guard in Step 4 calls on every request. It looks the "MCP token" up, throws `OAuthError` when there's no session (which the guard turns into a `401` with a `WWW-Authenticate` challenge), and otherwise describes the session. `expiresAt` is mandatory: the guard rejects any token whose expiry is unset.
+
+`extra` is how the session reaches the rest of the app. Since the verifier has already found it, it attaches what the tool handlers need — a `getAccessToken()` bound to this login — rather than making them look it up again. Step 4 unwraps it.
+
+## Step 3: Tool descriptions in `mcp.js`
+
+The tools now report on a person rather than an application, so say so:
+
+```diff
+     server.registerTool(
+         'list-hubs-projects',
+         {
+-            description: 'Lists all hubs and their projects available to the APS application.'
++            description: 'Lists all hubs and their projects available to the authenticated user.'
+         },
+```
+
+That's the only edit `mcp.js` needs. `createMcpServer(authenticationProvider)` keeps its signature and both tool handlers stay exactly as they were — the payoff of the shared `getAccessToken()` interface. The provider is about to start coming from a per-request OAuth session instead of a process-wide object, and no code that *uses* it has to know.
+
+## Step 4: Update the entry point
+
+Replace `index.js`:
 
 ```js
 import cors from 'cors';
-import { createMcpExpressApp } from '@modelcontextprotocol/express';
+import { createMcpExpressApp, requireBearerAuth, getOAuthProtectedResourceMetadataUrl } from '@modelcontextprotocol/express';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { toNodeHandler } from '@modelcontextprotocol/node';
-import { UserAuthenticationProvider } from './aps.js';
 import { createMcpServer } from './mcp.js';
+import { createOAuthProxy } from './proxy.js';
 
 const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
 if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
@@ -206,45 +289,58 @@ const PORT = parseInt(process.env.PORT || '3000');
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
 
-const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, CALLBACK_URL);
-const mcpHandler = createMcpHandler(() => createMcpServer(authProvider));
+const { router: authProxyRouter, tokenVerifier } = createOAuthProxy({
+    issuerUrl: new URL(PUBLIC_URL),
+    resourceUrl: new URL(`${PUBLIC_URL}/mcp`),
+    apsClientId: APS_CLIENT_ID,
+    apsClientSecret: APS_CLIENT_SECRET,
+    callbackUrl: CALLBACK_URL,
+});
+const mcpHandler = createMcpHandler((ctx) => createMcpServer(ctx.authInfo.extra.apsAuthenticationProvider));
 
 const app = createMcpExpressApp({ host: '0.0.0.0' });
 app.use(cors());
+app.use(authProxyRouter);
+
+app.use('/mcp', requireBearerAuth({
+    verifier: tokenVerifier,
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(new URL(`${PUBLIC_URL}/mcp`)),
+}));
 
 const mcpNodeHandler = toNodeHandler(mcpHandler);
 app.all('/mcp', (req, res) => mcpNodeHandler(req, res, req.body));
-
-app.get('/auth/callback', async (req, res) => {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('Missing code parameter.');
-    try {
-        await authProvider.exchangeAuthCode(code);
-        res.send('Login successful! You can close this window and return to your AI assistant.');
-    } catch (err) {
-        console.error('Auth callback error:', err);
-        res.status(500).send('Authentication failed.');
-    }
-});
 
 app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
 ```
 
 The diff from Part 2:
 
-- `AppAuthenticationProvider` becomes `UserAuthenticationProvider`, now constructed with a `CALLBACK_URL` so it knows where to send Autodesk's redirect.
-- `createMcpExpressApp`, `createMcpHandler`, `toNodeHandler`, and the `/mcp` route are untouched — the factory closure is the only place that knows about the auth provider, so swapping it there is enough.
-- A new `/auth/callback` route reads the `code` query parameter and calls `authProvider.exchangeAuthCode(code)` — there's no session or state lookup, because there's only one provider to populate.
+- No auth provider is constructed here any more. `createOAuthProxy` owns them, one per login, and `PUBLIC_URL` is now load-bearing: it's the issuer the metadata advertises and the base of the callback URL you registered with APS.
+- The handler's factory is called per request, and reaches into the auth info the guard below attached to pull out this login's APS session — the bound `getAccessToken()` the proxy put on `authInfo.extra`. That object is all `mcp.js` ever sees; the provider instance, and the raw APS tokens it caches, stay in `proxy.js`.
+- `app.use(authProxyRouter)` mounts every OAuth route: both discovery documents, `/authorize`, `/auth/callback`, and `/token`.
+- `requireBearerAuth` runs before the `/mcp` handler and rejects any request without a valid `Authorization: Bearer` header, returning a `401` whose challenge points OAuth-aware clients at the discovery metadata.
 
-Whoever completes the login at the URL `createMcpServer` handed back authenticates the whole server, for every current and future request, until the access and refresh tokens expire or the process restarts. That's the tradeoff this part's design note calls out — fine for a workshop where one attendee runs one server, not what you'd ship to production. It's worth noting this cuts both ways in the design note's Layer 1 story too: a real per-request bearer token doesn't need a session ID either — the token rides on every request, so the identity lookup (and the handler underneath it) can stay just as stateless as it is here.
+Note that `index.js` implements no OAuth logic of its own — it mounts a router and a guard. That's what keeps the entry point thin as the flow gets more involved.
 
 ## Checkpoint
 
 You should now have:
 
-- [x] `UserAuthenticationProvider` (with `getAuthorizationUrl` and `exchangeAuthCode` as instance methods) and `getItemTip` in `aps.js`
-- [x] `mcp.js` with a `withAuth` wrapper guarding both tool handlers
-- [x] `index.js` building one shared auth provider and serving `/auth/callback`
+- [x] `UserAuthenticationProvider` in `aps.js`, with the data helpers unchanged
+- [x] `proxy.js` exporting a factory with four routes and a token verifier
+- [x] `mcp.js` unchanged apart from a tool description
+- [x] `index.js` mounting the OAuth router and guarding `/mcp`
+
+```text
+.vscode/
+  mcp.json
+  launch.json
+aps.js
+mcp.js
+proxy.js
+index.js
+package.json
+```
 
 <details>
     <summary>
@@ -268,10 +364,6 @@ export class UserAuthenticationProvider {
             refreshToken: null,
             expiresAt: 0
         };
-    }
-
-    isAuthenticated() {
-        return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
     }
 
     getAuthorizationUrl() {
@@ -331,15 +423,6 @@ export async function getFolderContents(hubId, projectId, folderId, authenticati
         modifiedBy: item.attributes.lastModifiedUserName
     }));
 }
-
-export async function getItemTip(projectId, itemId, authenticationProvider) {
-    const client = new DataManagementClient({ authenticationProvider });
-    const { data } = await client.getItemTip(projectId, itemId);
-    return {
-        name: data.attributes.displayName,
-        derivativeUrn: data.relationships.derivatives.data.id
-    };
-}
 ```
 
 </details>
@@ -361,24 +444,15 @@ export function createMcpServer(authenticationProvider) {
         version: '1.0.0'
     });
 
-    const authUrl = authenticationProvider.getAuthorizationUrl();
-
-    const withAuth = (handler) => async (input) => {
-        if (!authenticationProvider.isAuthenticated()) {
-            return { content: [{ type: 'text', text: `Authentication is required. Please log in at: ${authUrl}` }] };
-        }
-        return await handler(input);
-    };
-
     server.registerTool(
         'list-hubs-projects',
         {
             description: 'Lists all hubs and their projects available to the authenticated user.'
         },
-        withAuth(async () => {
+        async () => {
             const hubs = await getHubsProjects(authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        })
+        }
     );
 
     server.registerTool(
@@ -391,10 +465,10 @@ export function createMcpServer(authenticationProvider) {
                 folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
             })
         },
-        withAuth(async ({ hubId, projectId, folderId }) => {
+        async ({ hubId, projectId, folderId }) => {
             const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        })
+        }
     );
 
     return server;
@@ -403,64 +477,39 @@ export function createMcpServer(authenticationProvider) {
 
 </details>
 
-<details>
-    <summary>
-        Reference: full <code>index.js</code>
-    </summary>
-
-```js
-import cors from 'cors';
-import { createMcpExpressApp } from '@modelcontextprotocol/express';
-import { createMcpHandler } from '@modelcontextprotocol/server';
-import { toNodeHandler } from '@modelcontextprotocol/node';
-import { UserAuthenticationProvider } from './aps.js';
-import { createMcpServer } from './mcp.js';
-
-const { APS_CLIENT_ID, APS_CLIENT_SECRET } = process.env;
-if (!APS_CLIENT_ID || !APS_CLIENT_SECRET) {
-    console.error('APS_CLIENT_ID and APS_CLIENT_SECRET environment variables are required.');
-    process.exit(1);
-}
-const PORT = parseInt(process.env.PORT || '3000');
-const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
-const CALLBACK_URL = `${PUBLIC_URL}/auth/callback`;
-
-const authProvider = new UserAuthenticationProvider(APS_CLIENT_ID, APS_CLIENT_SECRET, CALLBACK_URL);
-const mcpHandler = createMcpHandler(() => createMcpServer(authProvider));
-
-const app = createMcpExpressApp({ host: '0.0.0.0' });
-app.use(cors());
-
-const mcpNodeHandler = toNodeHandler(mcpHandler);
-app.all('/mcp', (req, res) => mcpNodeHandler(req, res, req.body));
-
-app.get('/auth/callback', async (req, res) => {
-    const { code } = req.query;
-    if (!code) return res.status(400).send('Missing code parameter.');
-    try {
-        await authProvider.exchangeAuthCode(code);
-        res.send('Login successful! You can close this window and return to your AI assistant.');
-    } catch (err) {
-        console.error('Auth callback error:', err);
-        res.status(500).send('Authentication failed.');
-    }
-});
-
-app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
-```
-
-</details>
-
 ### Try it out
 
-1. Restart the server: `npm start`.
-2. In VS Code, open a fresh Copilot Chat (a new chat won't have a cached tool result, so it actually calls the tool instead of reusing an old answer).
-3. Ask: *"What Forma projects do I have access to?"*
-4. The first tool call returns the "Authentication required" message with a URL.
-5. Open the URL in a browser, sign in with your Autodesk account, and see the *"Login successful!"* page.
-6. Re-run the same prompt. The tool now returns the hubs and projects that **your user** can see — which may differ from the application-level results you got in Part 2.
+Start with the two discovery documents — they isolate the OAuth mechanics from anything Copilot-specific. Restart the server (`npm start`), then open each URL below in a browser tab, replacing `<PUBLIC_URL>` with your forwarded Codespace URL. Use the public URL, not `localhost`: it exercises the same address an MCP client will read these documents from.
 
-> **Multiple chats.** Open a second Copilot Chat and ask the same question straight away — no second login required. That's the shared-provider tradeoff from this part's design note: every chat sees whichever user last completed the OAuth login, because there's only one `UserAuthenticationProvider` for the whole process. Restarting the server clears the login for everyone, not just one chat.
+1. `<PUBLIC_URL>/.well-known/oauth-authorization-server`
+
+   You should see `authorization_endpoint`, `token_endpoint`, and `client_id_metadata_document_supported: true`. Check that the two endpoints are built on your public URL rather than `localhost` — a client outside the Codespace can only reach the public one.
+
+2. `<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp`
+
+   Expect `resource` to be your `/mcp` URL and `authorization_servers` to list this server itself. Note the path: [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728) puts the resource's own path *after* the well-known segment.
+
+   If either tab shows a GitHub sign-in page instead of JSON, port 3000 is still private. Set its visibility to **Public** in the **Ports** panel.
+
+3. Call `/mcp` without a token, from a second terminal:
+
+   ```bash
+   curl -i http://localhost:3000/mcp
+   ```
+
+   Expect a `401` with a `WWW-Authenticate: Bearer ... resource_metadata="..."` header rather than an MCP response.
+
+Now the real thing:
+
+4. In VS Code, restart the MCP server entry in `.vscode/mcp.json` and open a fresh Copilot Chat. Ask: *"What Forma projects do I have access to?"*
+5. VS Code sees the `401`, discovers the sign-in flow, and opens a browser window on Autodesk's sign-in page. Sign in with your Autodesk account.
+6. The browser lands on VS Code's own redirect page. Behind it, `proxy.js` completed the APS exchange and issued an authorization code, VS Code swapped it at `/token`, and the tool call completed — with the hubs and projects **your user** can see, which may differ from the application-level results from Part 2.
+
+Common failure states:
+
+- **`invalid_request` / "Unknown client_id or redirect_uri" instead of a redirect to Autodesk.** The `/authorize` guard rejected the request. The `client_id` must be an `https://` URL, and the `redirect_uri` must appear in the document that URL serves. Some MCP clients still use classic dynamic client registration, which this proxy doesn't support; VS Code and `npx @modelcontextprotocol/inspector` both support CIMD.
+- **Autodesk rejects the login with a redirect URI mismatch.** `PUBLIC_URL` and the APS app's **Callback URL** disagree. Compare them character for character.
+- **`Not authenticated` from a tool.** The server restarted, taking every session with it. Reconnect the MCP server in VS Code to sign in again.
 
 ### Additional resources
 
@@ -468,3 +517,4 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 - [APS Authentication API reference](https://aps.autodesk.com/en/docs/oauth/v2/reference/http/)
 - [MCP Authorization specification](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization)
 - [OAuth Client ID Metadata Documents (draft)](https://datatracker.ietf.org/doc/html/draft-ietf-oauth-client-id-metadata-document-00)
+- [RFC 9728 — OAuth 2.0 Protected Resource Metadata](https://datatracker.ietf.org/doc/html/rfc9728)

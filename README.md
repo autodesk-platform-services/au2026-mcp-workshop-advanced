@@ -1,6 +1,6 @@
 # APS MCP Server (Advanced)
 
-An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that exposes Autodesk Forma project data over **Streamable HTTP**, acting on behalf of a signed-in Autodesk user. Built for the AU2026 advanced workshop, on top of the [beginner session](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner).
+An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that exposes Autodesk Forma project data over **Streamable HTTP**, acting on behalf of a signed-in Autodesk user. Built for the AU2026 advanced workshop, starting from the code the [beginner session](https://github.com/autodesk-platform-services/au2026-mcp-workshop-beginner) produces.
 
 ## What it does
 
@@ -46,7 +46,7 @@ npm start
 
 `.vscode/mcp.json` registers the server as **APS MCP Server (Advanced)** over HTTP at `http://localhost:3000/mcp`. Start the server first, then register it from that file — Copilot connects over the network rather than launching the process itself.
 
-Because `/mcp` is guarded by bearer auth, a spec-compliant client discovers the sign-in flow from the `401` challenge and opens a browser prompt on its own. `.vscode/launch.json` runs the same entry point under the Node debugger; delete its `envFile` line in a Codespace, where the secrets are already in the environment.
+Because `/mcp` is guarded by bearer auth, a spec-compliant client discovers the sign-in flow from the `401` challenge and opens a browser prompt on its own. `.vscode/launch.json` runs the same entry point under the Node debugger, with `PUBLIC_URL` derived from the Codespace's forwarded hostname; delete its `env` block when running locally.
 
 ## Architecture
 
@@ -58,7 +58,7 @@ proxy.js          OAuth authorization server in front of /mcp (demo-only, see be
 viewer.html       Self-contained APS Viewer panel, served as an MCP app resource
 ```
 
-`UserAuthenticationProvider` (in `aps.js`) holds a user's access and refresh tokens and exposes a single `getAccessToken()` method — the same interface the beginner's `AppAuthenticationProvider` had, which is why the Data Management helpers are unchanged across both sessions. Raw APS tokens never leave the class.
+`UserAuthenticationProvider` (in `aps.js`) holds a user's access and refresh tokens and exposes a single `getAccessToken()` method — the same interface a 2-legged provider exposes, which is why the Data Management helpers work unchanged under either. Raw APS tokens never leave the class.
 
 APS identity is resolved **per token**: `proxy.js` mints a `UserAuthenticationProvider` per authorization and attaches a bound `getAccessToken()` to each request's `authInfo`, so two clients never share a login.
 

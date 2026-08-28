@@ -12,7 +12,9 @@
                 "<node_internals>/**"
             ],
             "program": "${workspaceFolder}/index.js",
-            "envFile": "${workspaceFolder}/.env"
+            "env": {
+                "PUBLIC_URL": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+            }
         }
     ]
 }

@@ -16,10 +16,6 @@ export class UserAuthenticationProvider {
         };
     }
 
-    isAuthenticated() {
-        return !!this.cache.accessToken && this.cache.expiresAt > Date.now();
-    }
-
     getAuthorizationUrl() {
         return this.authClient.authorize(this.clientId, ResponseType.Code, this.callbackUrl, SCOPES);
     }

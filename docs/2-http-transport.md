@@ -1,73 +1,16 @@
 # Part 2: Streamable HTTP
 
-In this section you'll replace the STDIO transport from the beginner session with **Streamable HTTP**. The MCP server becomes a real network service that runs once and accepts connections from any MCP client over the network. Authentication stays 2-legged for now — the user-level OAuth flow comes in Part 3 once the transport groundwork is in place.
+In this section you'll replace the STDIO transport with **Streamable HTTP**, so the MCP server becomes a network service that runs on its own and accepts connections from any MCP client. `mcp.js` and `aps.js` need no changes at all.
 
 ## Theory
 
-### STDIO vs. Streamable HTTP
+STDIO worked well locally: VS Code launched `node index.js` as a child process and spoke JSON-RPC over its stdin/stdout. It has three limits, though. One client talks to one process, the server's lifetime is tied to the editor, and nothing listens on a port — which rules out a browser-based OAuth redirect, the whole point of Part 3.
 
-The beginner server used STDIO: VS Code launched `node index.js` as a child process and spoke JSON-RPC over its stdin/stdout. That works beautifully for local development but has three big limitations: only one client can talk to one process, the lifetime is tied to the editor, and there's no way to bolt on a web flow (like an OAuth redirect) because nothing is listening on a port.
+With Streamable HTTP the server runs independently and clients send JSON-RPC messages to a single endpoint. We'll use `/mcp`.
 
-`createMcpHandler` from `@modelcontextprotocol/server`, adapted to Express with `toNodeHandler` from `@modelcontextprotocol/node`, fixes all three. The server runs independently, and clients `POST` JSON-RPC messages to a single endpoint (we'll use `/mcp`).
+## Step 1: Rewrite the entry point
 
-### One handler, one factory
-
-`createMcpHandler` takes a single argument: a factory function it calls to build an `McpServer`. Handing it `() => createMcpServer(authenticationProvider)` is enough — tools and resources close over whatever the factory received, so every `McpServer` it builds comes out fully wired without you touching a transport object, a session map, or a `crypto.randomUUID()` call. `createMcpHandler` manages the protocol-level request/response bookkeeping internally, whatever that turns out to require for a given client.
-
-That works here because the *auth provider* is shared, not per-client: one `AppAuthenticationProvider` covers the whole process because every 2-legged token represents the application itself, not any particular user. In Part 3 you'll swap it for a `UserAuthenticationProvider` holding real user tokens — but you'll keep it just as shared, a workshop simplification Part 3 explains in detail. Because the factory is the only moving part, the beginner's `mcp.js` needs no changes at all to work under this transport.
-
-## Step 1: Keep the MCP factory unchanged
-
-`mcp.js` from the beginner workshop already returns an `McpServer` built around an injected auth provider. No changes needed in this step — the same factory works under both transports.
-
-If you have not copied it across yet, this is what it should look like:
-
-```js
-import { McpServer } from '@modelcontextprotocol/server';
-import { z } from 'zod';
-import { getHubsProjects, getFolderContents } from './aps.js';
-
-export function createMcpServer(authenticationProvider) {
-    const server = new McpServer({
-        name: 'aps-mcp-server',
-        description: 'MCP server for Autodesk Platform Services',
-        version: '1.0.0'
-    });
-
-    server.registerTool(
-        'list-hubs-projects',
-        {
-            description: 'Lists all hubs and their projects available to the APS application.',
-        },
-        async () => {
-            const hubs = await getHubsProjects(authenticationProvider);
-            return { content: [{ type: 'text', text: JSON.stringify(hubs, null, 2) }] };
-        }
-    );
-
-    server.registerTool(
-        'list-folder-contents',
-        {
-            description: 'Lists the contents of a folder in a project, or top-level folders if no folder ID is provided.',
-            inputSchema: z.object({
-                hubId: z.string().describe('Hub ID.'),
-                projectId: z.string().describe('Project ID.'),
-                folderId: z.string().optional().describe('Folder ID. Omit to list top-level folders.'),
-            })
-        },
-        async ({ hubId, projectId, folderId }) => {
-            const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
-            return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
-        }
-    );
-
-    return server;
-}
-```
-
-## Step 2: Rewrite the entry point
-
-Replace `index.js` with the HTTP-based version:
+Replace `index.js` with the HTTP version:
 
 ```js
 import cors from 'cors';
@@ -97,21 +40,19 @@ app.all('/mcp', (req, res) => mcpNodeHandler(req, res, req.body));
 app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`));
 ```
 
-What's happening:
+What this does:
 
-- `createMcpExpressApp` (from `@modelcontextprotocol/express`) is an Express app pre-configured for MCP servers — it applies `express.json()` for you. Mount your own middleware on it — we add `cors()` so browser-based clients can reach the endpoint.
-- `createMcpHandler` (from `@modelcontextprotocol/server`) wraps your factory into a framework-agnostic MCP request handler. `toNodeHandler` (from `@modelcontextprotocol/node`) adapts that handler's web-standard `fetch` interface to the `(req, res)` shape Express expects.
-- Because `createMcpExpressApp` already parsed the request body via `express.json()`, forward it explicitly: `mcpNodeHandler(req, res, req.body)`. Without that third argument the handler would try to read the request stream itself and find it already drained.
-- `app.all('/mcp', ...)` is the entire route: every request, of any method, goes through the same handler. There's no session header to inspect and no branching on `initialize` versus everything else — `createMcpHandler` works that out from the request itself.
-- Errors inside a tool handler, or a malformed request, are already turned into a proper JSON-RPC error response by `createMcpHandler` — there's no `try`/`catch` to write here.
+- `createMcpExpressApp` returns an Express app pre-configured for MCP servers, with a JSON body parser already installed. Add your own middleware to it, as we do with `cors()`.
+- `createMcpHandler` takes a factory function (creating MCP servers) and turns it into an HTTP handler that speakss the 2026-07-28 protocol. `toNodeHandler` adapts that handler to the `(req, res)` shape Express expects.
+- Passing `req.body` as the third argument matters: the Express app already parsed the request stream, so the handler must be handed the result rather than trying to parse the input stream again.
+- Errors thrown inside a tool handler come back as proper JSON-RPC errors, so there's no `try`/`catch` here.
+- `PUBLIC_URL` is only used in the log line for now. Part 3 needs it for the OAuth callback and Part 4 for the viewer's security policy.
 
-> **"Binding to 0.0.0.0 without DNS rebinding protection" warning.** `createMcpExpressApp({ host: '0.0.0.0' })` prints this to `stderr` on startup — it's expected here, not an error. Codespace port forwarding needs the server listening on all interfaces, and the warning is just the SDK reminding you that host/origin checks are off outside `localhost`. The [Extras](extras.md) production checklist covers locking this down for a real deployment.
+> **"Binding to 0.0.0.0 without DNS rebinding protection" warning.** Expected, not an error. Codespace port forwarding needs the server listening on all interfaces, and the warning is a reminder that host and origin checks are off outside `localhost`. The [Extras](extras.md) production checklist covers locking this down.
 
-> **Public URL.** `PUBLIC_URL` is unused right now but worth threading through — Part 3 needs it for the OAuth callback and Part 4 needs it for the viewer's CSP.
+## Step 2: Point VS Code at the HTTP endpoint
 
-## Step 3: Update the VS Code integration
-
-`.vscode/mcp.json` from the beginner session pointed at a STDIO command. Replace it with an HTTP entry:
+`.vscode/mcp.json` currently points at a STDIO command. Replace it with an HTTP entry:
 
 ```json
 {
@@ -124,17 +65,17 @@ What's happening:
 }
 ```
 
-When VS Code connects, it issues a `POST` to `/mcp` to initialize the connection, and every later message from Copilot goes to that same endpoint.
+`localhost:3000` is correct even in a Codespace: Copilot runs inside the same environment as the server.
 
-## Step 4: Add a debug launch configuration
+> [!CAUTION]
+> **TODO** verify this claim ^
 
-`npm start` runs the server, but it gives you no breakpoints. Add `.vscode/launch.json` so you can start the server under VS Code's Node debugger instead:
+## Step 3: Add a debug launch configuration
+
+`npm start` runs the server but gives you no debugging capabilities. Create `.vscode/launch.json`:
 
 ```json
 {
-    // Use IntelliSense to learn about possible attributes.
-    // Hover to view descriptions of existing attributes.
-    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
         {
@@ -145,55 +86,81 @@ When VS Code connects, it issues a `POST` to `/mcp` to initialize the connection
                 "<node_internals>/**"
             ],
             "program": "${workspaceFolder}/index.js",
-            "envFile": "${workspaceFolder}/.env"
+            "env": {
+                "PUBLIC_URL": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+            }
         }
     ]
 }
 ```
 
-Press <kbd>F5</kbd> (or pick **Launch MCP Server** in the **Run and Debug** panel) to start the server with the debugger attached. Breakpoints in `index.js`, `mcp.js`, and `aps.js` all hit, which is far more useful than `console.log` once Part 3 adds an OAuth flow with several redirects.
+The `env` block builds the public URL from the two variables Codespaces sets automatically, so the debugger gets the same value your terminal will get in Step 4.
 
-> **The `envFile` line.** It loads `APS_CLIENT_ID` and `APS_CLIENT_SECRET` from a gitignored `.env` file at the project root — useful when you run locally, because the debugger doesn't inherit the variables you exported in a terminal. In a Codespace your secrets are already in the environment, and the file doesn't exist. VS Code refuses to launch when `envFile` points at a missing file, so **delete that line if you're working in a Codespace.**
+> [!CAUTION]
+> **TODO** verify this claim ^
 
-> **One server at a time.** Both `npm start` and the debugger bind port `3000`. If you get `EADDRINUSE`, stop whichever one is already running.
+`APS_CLIENT_ID` and `APS_CLIENT_SECRET` are already in the Codespace environment, so the debugger inherits them.
+
+> **Working locally?** Delete the `env` block — those two variables don't exist outside a Codespace, and `PUBLIC_URL` then falls back to `http://localhost:3000`.
+
+## Step 4: Run the server in your Codespace
+
+The OAuth flow in Part 3 sends your browser to Autodesk and back again, so the server needs a URL reachable from outside the Codespace. Codespaces gives you one by forwarding port `3000`.
+
+1. Press <kbd>F5</kbd> (or pick **Launch MCP Server** in the **Run and Debug** panel) to start the server with the debugger attached.
+
+2. Open the **Debug Console** panel (bottom panel → **Debug Console** tab).
+
+  You should see something like `MCP server listening on https://fuzzy-octo-robot-abc123-3000.app.github.dev/mcp`. The part before `/mcp` is your server's public address. Keep it around as we'll need it later.
+
+3. Open the **Ports** panel (bottom panel → **Ports** tab). Port `3000` appears automatically once the server is listening. Right-click it and choose **Port Visibility → Public**.
+
+   Without this, anyone accessing your MCP server from outside of the Codespace would get a GitHub login page.
+
+4. Register the callback URL with your APS app. Open your APS application on the developer portal and set **Callback URL** to your server's public URL plus `/auth/callback`, for example, `https://fuzzy-octo-robot-abc123-3000.app.github.dev/auth/callback`.
+
+   APS accepts several callback URLs, so you can keep others alongside it. This value must match `PUBLIC_URL` exactly — same scheme, same host, no trailing slash difference.
+
+> **Codespace URLs are per-Codespace.** Delete the Codespace and create a new one, and the hostname changes. When that happens, repeat steps 1, 3 and 4.
+
+> **`EADDRINUSE: address already in use :::3000`.** Another server is still running — usually a debug session or a forgotten terminal. Find it and stop it:
+>
+> ```bash
+> lsof -i :3000
+> kill <PID>
+> ```
+>
+> Or in one line: `kill $(lsof -t -i:3000)`.
 
 ## Checkpoint
 
 You should now have:
 
-- [x] `mcp.js` carried over from the beginner project (no changes)
-- [x] `index.js` running an Express app at `/mcp`
+- [x] `index.js` serving an Express app at `/mcp`
 - [x] `.vscode/mcp.json` pointing Copilot at the HTTP endpoint
-- [x] `.vscode/launch.json` with a **Launch MCP Server** debug configuration
+- [x] `.vscode/launch.json` with a **Launch MCP Server** configuration
+- [x] Port `3000` forwarded and public
+- [x] A **Callback URL** on your APS app matching `PUBLIC_URL`
 
 ### Try it out
 
-1. Start the server: `npm start`, or press <kbd>F5</kbd> to start it under the debugger. You should see `MCP server listening on http://localhost:3000/mcp`.
-2. Open VS Code, register the server from `.vscode/mcp.json`, and open Copilot Chat in agent mode.
-3. Ask: *"What Forma projects do I have access to?"*
-4. Copilot calls `list-hubs-projects` and returns the hubs visible to your APS *application* (the same data you saw in the beginner workshop, since the auth model hasn't changed yet).
+1. With the server running, open `.vscode/mcp.json` and click **Start** above the server entry to register it.
+2. Open Copilot Chat in agent mode and ask: *"What Forma projects do I have access to?"*
+3. Copilot calls `list-hubs-projects` and returns the hubs visible to your APS **application**.
 
-The output is still scoped to the app, not a user — exactly what Part 3 will change.
+The results are still scoped to the application, not to you — that's what Part 3 changes.
 
-> **Debugging tip — MCP Inspector.** When the HTTP transport doesn't behave, bypass Copilot and connect the MCP Inspector to the running server:
+> **Debugging tip — MCP Inspector.** When the transport misbehaves, bypass Copilot. With the server already running, open a second terminal and connect the Inspector to it:
 >
 > ```bash
 > npx @modelcontextprotocol/inspector http://localhost:3000/mcp
 > ```
 >
-> The command starts the Inspector's web UI on port **6274** inside your Codespace. Because the Codespace is a remote environment, the web UI is **not** automatically available in your local browser — you need to forward the port:
->
-> 1. Open the **Ports** panel in VS Code (bottom panel → **Ports** tab).
-> 2. Look for port `6274` — VS Code usually detects and adds it automatically when the Inspector starts.
-> 3. Hover over the **Forwarded Address** column and click the globe icon to open it in your browser.
->
-> The Inspector shows the raw JSON-RPC traffic, lets you invoke tools manually, and is the fastest way to isolate transport bugs from tool bugs.
->
-> Note that this command connects to your already-running server at `localhost:3000` — **start the server first** with `npm start`, then run the Inspector command in a second terminal.
+> It starts a web UI on port `6274`, which VS Code adds to the **Ports** panel automatically. Click the globe icon next to the forwarded address to open it. The Inspector shows the raw JSON-RPC traffic and lets you invoke tools by hand — the fastest way to tell a transport problem from a tool problem.
 
 ### Additional resources
 
 - [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports#streamable-http)
-- [Express middleware reference](https://expressjs.com/en/4x/api.html)
+- [Forwarding ports in a Codespace](https://docs.github.com/en/codespaces/developing-in-a-codespace/forwarding-ports-in-your-codespace)
 - [MCP Inspector](https://github.com/modelcontextprotocol/inspector)
 - [VS Code Node.js debugging](https://code.visualstudio.com/docs/nodejs/nodejs-debugging)
