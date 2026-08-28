@@ -8,7 +8,7 @@ STDIO worked well locally: VS Code launched `node index.js` as a child process a
 
 With Streamable HTTP the server runs independently and clients send JSON-RPC messages to a single endpoint. We'll use `/mcp`.
 
-## Step 1: Rewrite the entry point
+## Step 1: Update index.js
 
 Replace `index.js` with the HTTP version:
 
@@ -50,7 +50,7 @@ What this does:
 
 > **"Binding to 0.0.0.0 without DNS rebinding protection" warning.** Expected, not an error. Codespace port forwarding needs the server listening on all interfaces, and the warning is a reminder that host and origin checks are off outside `localhost`. The [Extras](extras.md) production checklist covers locking this down.
 
-## Step 2: Point VS Code at the HTTP endpoint
+## Step 2: Update mcp.json
 
 `.vscode/mcp.json` currently points at a STDIO command. Replace it with an HTTP entry:
 
@@ -70,7 +70,7 @@ What this does:
 > [!CAUTION]
 > **TODO** verify this claim ^
 
-## Step 3: Add a debug launch configuration
+## Step 3: Setup debugging
 
 `npm start` runs the server but gives you no debugging capabilities. Create `.vscode/launch.json`:
 
@@ -103,7 +103,7 @@ The `env` block builds the public URL from the two variables Codespaces sets aut
 
 > **Working locally?** Delete the `env` block — those two variables don't exist outside a Codespace, and `PUBLIC_URL` then falls back to `http://localhost:3000`.
 
-## Step 4: Run the server in your Codespace
+## Step 4: Run server in Codespace
 
 The OAuth flow in Part 3 sends your browser to Autodesk and back again, so the server needs a URL reachable from outside the Codespace. Codespaces gives you one by forwarding port `3000`.
 

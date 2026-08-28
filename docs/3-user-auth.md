@@ -26,7 +26,7 @@ So our server takes on the role itself. It advertises its own authorization and 
 
 > **Design note: this is a workshop stand-in, not production-ready.** The proxy you're about to write trades away most of what a real authorization server does: no persistence, no PKCE verification, no client authentication at the token endpoint, no rate limiting, no revocation, no rotation on refresh. All state lives in memory. That's a deliberate trade of robustness for a file you can read in one sitting — don't ship it as-is. A real deployment either builds a purpose-fit proxy with the missing checks, or integrates a dedicated identity provider (Auth0, Okta, Entra ID, …). [Extras](extras.md) links a full reference implementation built on Auth0.
 
-## Step 1: User authentication provider
+## Step 1: Add user auth
 
 In `aps.js`, update the imports and replace `AppAuthenticationProvider` with a user-level provider:
 
@@ -87,9 +87,9 @@ Two properties carry the rest of the design:
 - The cache holds an access token *and* a refresh token, so a session survives the token expiration without another sign-in.
 - `getAccessToken()` is the only method anything outside this class calls for a token, and it returns the same thing the 2-legged provider did. `getHubsProjects` and `getFolderContents` therefore need no changes — they still receive `{ authenticationProvider }` and let the SDK ask for a token when it needs one.
 
-## Step 2: OAuth proxy
+## Step 2: Add OAuth proxy
 
-This step is a shortcut. Every other file in the workshop grows a few lines at a time, but an OAuth flow has no useful halfway point — until all four routes exist, none of them do anything you can test. So create `proxy.js` at the project root, paste the whole file in, and read the tour that follows it. One factory, four routes, about 100 lines:
+This step is a shortcut. Create `proxy.js` at the project root, paste the whole file in, and read the tour that follows it. One factory, four routes, about 100 lines:
 
 ```js
 // Demo-only OAuth proxy for this workshop: in-memory, no PKCE or client authentication, and missing most other production checks — replace it with a purpose-built implementation or a third-party identity provider before shipping.
@@ -253,7 +253,7 @@ An MCP client's `client_id` is an HTTPS URL it controls, pointing at a small JSO
 
 `extra` is how the session reaches the rest of the app. Since the verifier has already found it, it attaches what the tool handlers need — a `getAccessToken()` bound to this login — rather than making them look it up again. Step 4 unwraps it.
 
-## Step 3: Tool descriptions in `mcp.js`
+## Step 3: Update mcp.js
 
 The tools now report on a person rather than an application, so say so:
 
@@ -268,7 +268,7 @@ The tools now report on a person rather than an application, so say so:
 
 That's the only edit `mcp.js` needs. `createMcpServer(authenticationProvider)` keeps its signature and both tool handlers stay exactly as they were — the payoff of the shared `getAccessToken()` interface. The provider is about to start coming from a per-request OAuth session instead of a process-wide object, and no code that *uses* it has to know.
 
-## Step 4: Update the entry point
+## Step 4: Update index.js
 
 Replace `index.js`:
 

@@ -11,7 +11,7 @@ Open it on GitHub and click **Use this template → Create a new repository** (o
 > [!CAUTION]
 > **TODO**: verify this step ^
 
-## Step 2: Store your APS credentials
+## Step 2: Configure secrets
 
 Your server reads its APS credentials from environment variables, and Codespaces injects them for you from account-level secrets.
 
@@ -33,7 +33,7 @@ From your repository on GitHub, click **Code → Codespaces → Create codespace
 
 You can also open the same Codespace in desktop VS Code (**Codespaces: Open in VS Code Desktop** from the command palette) if you prefer.
 
-## Step 4: Dependencies
+## Step 4: Update package.json
 
 Replace `package.json` with the advanced version:
 

@@ -11,7 +11,7 @@ MCP Apps adds two concepts on top of the server you already have, both expressed
 
 The APS Viewer running inside that page needs three things: its own scripts and stylesheet from `developer.api.autodesk.com`, the design's URN, and an access token to access the design's derivatives.
 
-## Step 1: Viewer UI
+## Step 1: Add viewer UI
 
 Create `viewer.html` in the project root:
 
@@ -54,7 +54,7 @@ Create `viewer.html` in the project root:
 
 The empty `<div>` is where the viewer mounts. `min-height` matters more than it looks: the panel the host gives you can be short, and the viewer needs a canvas with actual height to initialise into.
 
-## Step 2: Viewer logic
+## Step 2: Add viewer logic
 
 Replace the `TODO` with the inline module script:
 
@@ -102,7 +102,7 @@ Traffic flows in both directions here:
 - `updateModelContext` pushes the current selection back into the AI's context. The model can then answer "what's the area of the selected slab?" without the user typing any IDs.
 - `requestDisplayMode({ mode: 'pip' })` asks the host for a picture-in-picture panel rather than an inline strip — the viewer wants room.
 
-## Step 3: MCP resource & tool
+## Step 3: Add MCP tool & resource
 
 The tool needs one APS call the earlier parts didn't: resolving a design to its latest version and derivative URN. Add it to `aps.js`:
 
@@ -206,7 +206,7 @@ What differs from a normal tool and a normal resource:
 - The access token is fetched from the same provider the other tools use and travels inside `structuredContent`. It's short-lived and scoped to `data:read`, and it's the only APS token that ever leaves the process — the viewer needs it to fetch derivatives directly.
 - The resource's read callback receives the requested `uri` and echoes it back on the content entry, which also repeats the MIME type. MCP requires each entry to carry its own URI.
 
-## Step 4: Update the entry point
+## Step 4: Update index.js
 
 The factory takes a second argument now, so pass it through:
 
