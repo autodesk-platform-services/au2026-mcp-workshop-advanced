@@ -66,13 +66,15 @@ export async function getFolderContents(hubId, projectId, folderId, authenticati
     const { data: items = [] } = folderId
         ? await client.getFolderContents(projectId, folderId)
         : await client.getProjectTopFolders(hubId, projectId);
-    return items.map(item => ({
-        type: item.type,
-        id: item.id,
-        name: item.attributes.displayName,
-        modifiedAt: item.attributes.lastModifiedTime,
-        modifiedBy: item.attributes.lastModifiedUserName
-    }));
+    return items
+        .filter(item => !item.attributes.hidden) // skip entries the Forma UI hides, e.g. system folders
+        .map(item => ({
+            type: item.type,
+            id: item.id,
+            name: item.attributes.displayName,
+            modifiedAt: item.attributes.lastModifiedTime,
+            modifiedBy: item.attributes.lastModifiedUserName
+        }));
 }
 
 export async function getItemTip(projectId, itemId, authenticationProvider) {
