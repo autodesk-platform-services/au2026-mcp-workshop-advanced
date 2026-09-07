@@ -62,6 +62,7 @@ export async function getHubsProjects(authenticationProvider) {
 
 export async function getFolderContents(hubId, projectId, folderId, authenticationProvider) {
     const client = new DataManagementClient({ authenticationProvider });
+    // TODO: only the first page of results is returned; folders with more than 200 children need pagination via links.next
     const { data: items = [] } = folderId
         ? await client.getFolderContents(projectId, folderId)
         : await client.getProjectTopFolders(hubId, projectId);
