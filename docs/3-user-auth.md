@@ -410,7 +410,7 @@ export async function getHubsProjects(authenticationProvider) {
     }));
 }
 
-export async function getFolderContents(hubId, projectId, folderId, authenticationProvider) {
+export async function getFolderContents(authenticationProvider, hubId, projectId, folderId) {
     const client = new DataManagementClient({ authenticationProvider });
     // TODO: only the first page of results is returned; folders with more than 200 children need pagination via links.next
     const { data: items = [] } = folderId
@@ -473,7 +473,7 @@ export function createMcpServer(authenticationProvider) {
             annotations: { readOnlyHint: true }
         },
         async ({ hubId, projectId, folderId }) => {
-            const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
+            const items = await getFolderContents(authenticationProvider, hubId, projectId, folderId);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
         }
     );

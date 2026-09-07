@@ -60,7 +60,7 @@ export async function getHubsProjects(authenticationProvider) {
     }));
 }
 
-export async function getFolderContents(hubId, projectId, folderId, authenticationProvider) {
+export async function getFolderContents(authenticationProvider, hubId, projectId, folderId) {
     const client = new DataManagementClient({ authenticationProvider });
     // TODO: only the first page of results is returned; folders with more than 200 children need pagination via links.next
     const { data: items = [] } = folderId
@@ -77,7 +77,7 @@ export async function getFolderContents(hubId, projectId, folderId, authenticati
         }));
 }
 
-export async function getItemTip(projectId, itemId, authenticationProvider) {
+export async function getItemTip(authenticationProvider, projectId, itemId) {
     const client = new DataManagementClient({ authenticationProvider });
     const { data } = await client.getItemTip(projectId, itemId);
     return {

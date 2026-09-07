@@ -107,7 +107,7 @@ Traffic flows in both directions here:
 The tool needs one APS call the earlier parts didn't: resolving a design to its latest version and derivative URN. Add it to `aps.js`:
 
 ```js
-export async function getItemTip(projectId, itemId, authenticationProvider) {
+export async function getItemTip(authenticationProvider, projectId, itemId) {
     const client = new DataManagementClient({ authenticationProvider });
     const { data } = await client.getItemTip(projectId, itemId);
     return {
@@ -165,7 +165,7 @@ Then register the tool and the resource, just before `return server`:
         },
         async ({ projectId, designId, region = 'US' }) => {
             const accessToken = await authenticationProvider.getAccessToken();
-            const tip = await getItemTip(projectId, designId, authenticationProvider);
+            const tip = await getItemTip(authenticationProvider, projectId, designId);
             const config = {
                 accessToken,
                 env: 'AutodeskProduction2',
@@ -373,7 +373,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
             annotations: { readOnlyHint: true }
         },
         async ({ hubId, projectId, folderId }) => {
-            const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
+            const items = await getFolderContents(authenticationProvider, hubId, projectId, folderId);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
         }
     );
@@ -395,7 +395,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
         },
         async ({ projectId, designId, region = 'US' }) => {
             const accessToken = await authenticationProvider.getAccessToken();
-            const tip = await getItemTip(projectId, designId, authenticationProvider);
+            const tip = await getItemTip(authenticationProvider, projectId, designId);
             const config = {
                 accessToken,
                 env: 'AutodeskProduction2',

@@ -47,7 +47,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
             annotations: { readOnlyHint: true }
         },
         async ({ hubId, projectId, folderId }) => {
-            const items = await getFolderContents(hubId, projectId, folderId, authenticationProvider);
+            const items = await getFolderContents(authenticationProvider, hubId, projectId, folderId);
             return { content: [{ type: 'text', text: JSON.stringify(items, null, 2) }] };
         }
     );
@@ -69,7 +69,7 @@ export function createMcpServer(authenticationProvider, publicUrl) {
         },
         async ({ projectId, designId, region = 'US' }) => {
             const accessToken = await authenticationProvider.getAccessToken();
-            const tip = await getItemTip(projectId, designId, authenticationProvider);
+            const tip = await getItemTip(authenticationProvider, projectId, designId);
             const config = {
                 accessToken,
                 env: 'AutodeskProduction2',
