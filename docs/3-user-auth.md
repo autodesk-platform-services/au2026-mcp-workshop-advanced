@@ -68,7 +68,7 @@ export class UserAuthenticationProvider {
     }
 
     async getAccessToken() {
-        if (this.cache.accessToken && this.cache.expiresAt > Date.now()) {
+        if (this.cache.accessToken && this.cache.expiresAt > Date.now() + 60 * 1000) { // refresh a minute early to absorb clock skew and request latency
             return this.cache.accessToken;
         } else if (this.cache.refreshToken) {
             await this.refreshAccessToken(this.cache.refreshToken);
@@ -84,7 +84,7 @@ The class covers the three steps of the 3-legged flow that touch APS. `getAuthor
 
 Two properties carry the rest of the design:
 
-- The cache holds an access token *and* a refresh token, so a session survives the token expiration without another sign-in.
+- The cache holds an access token *and* a refresh token, so a session survives the token expiration without another sign-in. The one-minute margin in the expiry check is what stops a token being handed out with a second left on it — without it, a request can reach APS after the token has expired and fail with a sporadic `401`.
 - `getAccessToken()` is the only method anything outside this class calls for a token, and it returns the same thing the 2-legged provider did. `getHubsProjects` and `getFolderContents` therefore need no changes — they still receive `{ authenticationProvider }` and let the SDK ask for a token when it needs one.
 
 ## Step 2: Add OAuth proxy
@@ -385,7 +385,7 @@ export class UserAuthenticationProvider {
     }
 
     async getAccessToken() {
-        if (this.cache.accessToken && this.cache.expiresAt > Date.now()) {
+        if (this.cache.accessToken && this.cache.expiresAt > Date.now() + 60 * 1000) { // refresh a minute early to absorb clock skew and request latency
             return this.cache.accessToken;
         } else if (this.cache.refreshToken) {
             await this.refreshAccessToken(this.cache.refreshToken);

@@ -35,7 +35,7 @@ export class UserAuthenticationProvider {
     }
 
     async getAccessToken() {
-        if (this.cache.accessToken && this.cache.expiresAt > Date.now()) {
+        if (this.cache.accessToken && this.cache.expiresAt > Date.now() + 60 * 1000) { // refresh a minute early to absorb clock skew and request latency
             return this.cache.accessToken;
         } else if (this.cache.refreshToken) {
             await this.refreshAccessToken(this.cache.refreshToken);
