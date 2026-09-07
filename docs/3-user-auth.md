@@ -482,7 +482,7 @@ export function createMcpServer(authenticationProvider) {
 
 </details>
 
-### Try it out
+## Try it out
 
 Start with the two discovery documents — they isolate the OAuth mechanics from anything Copilot-specific. Restart the server (`npm start`), then open each URL below in a browser tab, replacing `<PUBLIC_URL>` with your forwarded Codespace URL. Use the public URL, not `localhost`: it exercises the same address an MCP client will read these documents from.
 
@@ -517,7 +517,7 @@ Common failure states:
 - **Autodesk sign-in succeeds but VS Code keeps waiting, or the page it lands on says "Unauthorized: No valid session for this codespace".** The browser editor failed to take the redirect back, so the authorization code never reached the client. Press <kbd>F1</kbd>, run **Codespaces: Open in VS Code Desktop**, and sign in again from there — the desktop app receives the redirect on your own machine. A fresh Codespace also clears it.
 - **`Not authenticated` from a tool.** The server restarted, taking every session with it. Reconnect the MCP server in VS Code to sign in again.
 
-### Additional resources
+## Additional resources
 
 - [APS 3-legged OAuth tutorial](https://aps.autodesk.com/en/docs/oauth/v2/tutorials/get-3-legged-token/)
 - [APS Authentication API reference](https://aps.autodesk.com/en/docs/oauth/v2/reference/http/)

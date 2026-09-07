@@ -138,7 +138,7 @@ You should now have:
 - [x] Port `3000` forwarded and public
 - [x] A **Callback URL** on your APS app matching `PUBLIC_URL`
 
-### Try it out
+## Try it out
 
 1. With the server running, open `.vscode/mcp.json` and click **Start** above the server entry to register it.
 2. Open Copilot Chat in agent mode and ask: *"What Forma projects do I have access to?"*
@@ -154,7 +154,7 @@ The results are still scoped to the application, not to you — that's what Part
 >
 > It starts a web UI on port `6274`, which VS Code adds to the **Ports** panel automatically. Click the globe icon next to the forwarded address to open it. The Inspector shows the raw JSON-RPC traffic and lets you invoke tools by hand — the fastest way to tell a transport problem from a tool problem.
 
-### Additional resources
+## Additional resources
 
 - [MCP Streamable HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports#streamable-http)
 - [Forwarding ports in a Codespace](https://docs.github.com/en/codespaces/developing-in-a-codespace/forwarding-ports-in-your-codespace)

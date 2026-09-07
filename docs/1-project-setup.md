@@ -101,7 +101,7 @@ echo $APS_CLIENT_ID
 
 If that prints nothing, revisit Step 2 — every later part depends on it.
 
-### Additional resources
+## Additional resources
 
 - [Express documentation](https://expressjs.com/)
 - [GitHub Codespaces secrets](https://docs.github.com/en/codespaces/managing-your-codespaces/managing-your-account-specific-secrets-for-github-codespaces)

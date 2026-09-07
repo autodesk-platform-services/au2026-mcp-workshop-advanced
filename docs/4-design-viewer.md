@@ -484,7 +484,7 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 
 </details>
 
-### Try it out
+## Try it out
 
 1. Restart the server, then reconnect the MCP server entry in VS Code so it picks up the new tool.
 2. In Copilot Chat (agent mode), ask for a preview:
@@ -498,11 +498,11 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 
 > **Blank panel?** Open the panel's developer tools and look for content security policy errors. Any origin the page reaches that isn't in `VIEWER_DOMAINS` or `VIEWER_SCRIPT_DOMAINS` is blocked by the host.
 
-### Where next?
+## Where next?
 
 You now have an HTTP MCP server that only signed-in MCP clients can reach, that acts as a real Autodesk user, and that can render designs in 3D inside the chat — the core mechanics behind any AI assistant working on a user's Autodesk data. [Extras](extras.md) covers spec-driven development with GitHub Spec-Kit, a production-grade alternative to the workshop's OAuth proxy, and a checklist for hardening the rest.
 
-### Additional resources
+## Additional resources
 
 - [APS Viewer developer guide](https://aps.autodesk.com/en/docs/viewer/v7/developers_guide/overview/)
 - [`@modelcontextprotocol/ext-apps` documentation](https://www.npmjs.com/package/@modelcontextprotocol/ext-apps)
