@@ -343,7 +343,7 @@ const VIEWER_SCRIPT_DOMAINS = ['https://cdn.jsdelivr.net'];
 export function createMcpServer(authenticationProvider, publicUrl) {
     const server = new McpServer({
         name: 'aps-mcp-server',
-        description: 'MCP server for Autodesk Platform Services',
+        title: 'APS MCP Server',
         version: '1.0.0'
     });
 

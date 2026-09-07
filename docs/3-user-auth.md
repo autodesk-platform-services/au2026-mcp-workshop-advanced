@@ -441,7 +441,7 @@ import { getHubsProjects, getFolderContents } from './aps.js';
 export function createMcpServer(authenticationProvider) {
     const server = new McpServer({
         name: 'aps-mcp-server',
-        description: 'MCP server for Autodesk Platform Services',
+        title: 'APS MCP Server',
         version: '1.0.0'
     });
 
