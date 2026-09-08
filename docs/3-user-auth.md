@@ -26,6 +26,8 @@ So our server takes on the role itself. It advertises its own authorization and 
 
 > **Design note: this is a workshop stand-in, not production-ready.** The proxy you're about to write trades away most of what a real authorization server does: no persistence, no PKCE verification, no client authentication at the token endpoint, no rate limiting, no revocation, no rotation on refresh. All state lives in memory. That's a deliberate trade of robustness for a file you can read in one sitting — don't ship it as-is. A real deployment either builds a purpose-fit proxy with the missing checks, or integrates a dedicated identity provider (Auth0, Okta, Entra ID, …). [Extras](extras.md) links a full reference implementation built on Auth0.
 
+Want to go deeper on MCP auth? Check out the [AU2026 class on this topic](https://conferences.autodesk.com/flow/autodesk/au2026/sessioncatalog/page/inperson/session/1774345141992001PAw3).
+
 ## Step 1: Add user auth
 
 In `aps.js`, update the imports and replace `AppAuthenticationProvider` with a user-level provider:
