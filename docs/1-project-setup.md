@@ -13,10 +13,10 @@ Open it on GitHub and click **Use this template → Create a new repository** (o
 
 ## Step 2: Configure secrets
 
-Your server reads its APS credentials from environment variables, and Codespaces injects them for you from account-level secrets.
+Your server reads its APS credentials from environment variables, and Codespaces injects them for you from secrets stored on the repository.
 
-1. Go to [github.com/settings/codespaces](https://github.com/settings/codespaces).
-2. Under **Codespace user secrets**, add two secrets and give your new repository access to both:
+1. In your new repository on GitHub, go to **Settings → Secrets and variables → Codespaces**.
+2. Click **New repository secret** and add two secrets:
 
    | Name | Value |
    | --- | --- |
@@ -104,5 +104,5 @@ If that prints nothing, revisit Step 2 — every later part depends on it.
 ## Additional resources
 
 - [Express documentation](https://expressjs.com/)
-- [GitHub Codespaces secrets](https://docs.github.com/en/codespaces/managing-your-codespaces/managing-your-account-specific-secrets-for-github-codespaces)
+- [GitHub Codespaces secrets](https://docs.github.com/en/codespaces/managing-your-codespaces/managing-encrypted-secrets-for-your-repository-and-organization-for-github-codespaces)
 - [MCP TypeScript SDK v2 migration guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/docs/migration/upgrade-to-v2.md)

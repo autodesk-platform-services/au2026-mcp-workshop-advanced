@@ -117,28 +117,26 @@ export async function getItemTip(authenticationProvider, projectId, itemId) {
 }
 ```
 
-Now extend `mcp.js`. First the imports and module constants:
+Now extend `mcp.js`. Replace the top of the file — from the imports down to the `createMcpServer` signature — with:
 
-```diff
-+import { readFileSync } from 'node:fs';
- import { McpServer } from '@modelcontextprotocol/server';
- import { z } from 'zod';
--import { getHubsProjects, getFolderContents } from './aps.js';
-+import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
-+
-+const VIEWER_HTML = readFileSync(new URL('./viewer.html', import.meta.url), 'utf-8');
-+
-+const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
-+const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
-+const VIEWER_DOMAINS = [
-+    'https://developer.api.autodesk.com',
-+    'https://cdn.derivative.autodesk.com',
-+    'https://fonts.autodesk.com',
-+];
-+const VIEWER_SCRIPT_DOMAINS = ['https://cdn.jsdelivr.net'];
- 
--export function createMcpServer(authenticationProvider) {
-+export function createMcpServer(authenticationProvider, publicUrl) {
+```js
+import { readFileSync } from 'node:fs';
+import { McpServer } from '@modelcontextprotocol/server';
+import { z } from 'zod';
+import { getHubsProjects, getFolderContents, getItemTip } from './aps.js';
+
+const VIEWER_HTML = readFileSync(new URL('./viewer.html', import.meta.url), 'utf-8');
+
+const VIEWER_RESOURCE_URI = 'ui://aps-mcp/viewer.html';
+const VIEWER_RESOURCE_MIME_TYPE = 'text/html;profile=mcp-app';
+const VIEWER_DOMAINS = [
+    'https://developer.api.autodesk.com',
+    'https://cdn.derivative.autodesk.com',
+    'https://fonts.autodesk.com',
+];
+const VIEWER_SCRIPT_DOMAINS = ['https://cdn.jsdelivr.net'];
+
+export function createMcpServer(authenticationProvider, publicUrl) {
 ```
 
 The two domain lists become the resource's content security policy. `VIEWER_DOMAINS` covers the APS endpoints the viewer fetches and streams from; `VIEWER_SCRIPT_DOMAINS` is the CDN that serves a script and never receives a connection. Keeping them apart is what lets the policy grant each origin only what it needs. The host enforces whatever the server declares, so a new external origin in `viewer.html` is blocked until you add it to the matching list.
@@ -210,11 +208,10 @@ What differs from a normal tool and a normal resource:
 
 ## Step 4: Update index.js
 
-The factory takes a second argument now, so pass it through:
+The factory takes a second argument now, so pass it through. Replace the `createMcpHandler` line with:
 
-```diff
--const mcpHandler = createMcpHandler((ctx) => createMcpServer(ctx.authInfo.extra.apsAuthenticationProvider));
-+const mcpHandler = createMcpHandler((ctx) => createMcpServer(ctx.authInfo.extra.apsAuthenticationProvider, PUBLIC_URL));
+```js
+const mcpHandler = createMcpHandler((ctx) => createMcpServer(ctx.authInfo.extra.apsAuthenticationProvider, PUBLIC_URL));
 ```
 
 That's the only change in `index.js`, and it's why `PUBLIC_URL` had to be threaded through from Part 2: the panel's security policy is expressed relative to the server's own public origin.
