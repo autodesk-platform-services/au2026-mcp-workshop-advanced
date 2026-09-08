@@ -8,6 +8,8 @@ In this section you'll make the server act on behalf of a real Autodesk user ins
 
 There are two independent trust boundaries here:
 
+![Overview of the two auth boundaries](two-auth-layers.png)
+
 - **Your server → APS.** A 3-legged OAuth flow that gets a token representing *a signed-in Autodesk user*, so the tools return that user's hubs, projects and files.
 - **MCP client → your server.** A separate OAuth flow that answers "who is calling `/mcp`?". Right now the endpoint is wide open to anyone who can reach the port, which is a problem the moment it holds a user's session.
 
