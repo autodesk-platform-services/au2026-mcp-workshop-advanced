@@ -24,6 +24,19 @@ An MCP client that hits a protected `/mcp` expects a `401` telling it where to s
 
 So our server takes on the role itself. It advertises its own authorization and token endpoints, runs the user through Autodesk's real sign-in page behind the scenes, and hands the MCP client its own generated credentials — while the actual APS tokens stay on the server. That's what `proxy.js` does in Step 2.
 
+### The flow, step by step
+
+Here's the same two-hop dance from the previous section, laid out as a sequence diagram with VS Code as the MCP client:
+
+![Sequence diagram of VS Code, the MCP server's OAuth proxy, and Autodesk (APS)](oauth-flow.svg)
+
+A few things to note:
+
+- Steps 1 and 2 are how VS Code discovers that a sign-in is needed at all, and where to send the user. `<PUBLIC_URL>` is the same domain for both the MCP endpoint and the OAuth proxy — there's only one server.
+- Step 3 uses VS Code's *own* callback URL (`vscode.dev/redirect`), not the one registered with APS. Step 4 uses the proxy's callback (`<PUBLIC_URL>/auth/callback`), the one you register in the APS app. The proxy sits between the two, so each side only ever sees the callback URL it expects.
+- Step 6 is the hinge: the proxy already holds a real APS token from step 5, but VS Code never sees it. It gets a separate, proxy-issued code instead, which step 7 exchanges for its own MCP access token.
+- The final request is the one every tool call makes afterwards: `/mcp` with the MCP access token as a bearer credential, not the APS token.
+
 > **Design note: this is a workshop stand-in, not production-ready.** The proxy you're about to write trades away most of what a real authorization server does: no persistence, no PKCE verification, no client authentication at the token endpoint, no rate limiting, no revocation, no rotation on refresh. All state lives in memory. That's a deliberate trade of robustness for a file you can read in one sitting — don't ship it as-is. A real deployment either builds a purpose-fit proxy with the missing checks, or integrates a dedicated identity provider (Auth0, Okta, Entra ID, …). [Extras](extras.md) links a full reference implementation built on Auth0.
 
 Want to go deeper on MCP auth? Check out the [AU2026 class on this topic](https://conferences.autodesk.com/flow/autodesk/au2026/sessioncatalog/page/inperson/session/1774345141992001PAw3).
