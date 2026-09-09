@@ -1,0 +1,39 @@
+sequenceDiagram
+    participant VSCode as VS Code<br/>(MCP Client)
+    participant MCPServer as Your MCP Server
+    participant Proxy as OAuth Proxy
+    participant User as User
+    participant APS as APS
+
+    Note over MCPServer,Proxy: Same origin: <PUBLIC_URL>
+
+    VSCode->>MCPServer: Connect to /mcp
+    MCPServer-->>VSCode: 401 Unauthorized
+
+    VSCode->>MCPServer: GET /.well-known/oauth-protected-resource/mcp
+    MCPServer-->>VSCode: authorization_servers: [<PUBLIC_URL>]
+    Note over VSCode,MCPServer: Authorization server (proxy) is on the same domain
+
+    VSCode->>Proxy: GET /.well-known/oauth-authorization-server
+    Proxy-->>VSCode: auth server metadata
+
+    VSCode->>Proxy: GET /authorize?redirect_uri=vscode.dev/redirect&...
+    Proxy->>APS: Redirect to APS authorize (redirect_uri=<PUBLIC_URL>/auth/callback)
+    APS->>User: Show sign-in / consent screen
+    User->>APS: Signs in and consents
+    APS->>Proxy: GET /auth/callback?code=<APS code>
+    Proxy->>APS: POST /token with APS code
+    APS-->>Proxy: APS access + refresh token
+    Note over Proxy: Caches  APS credentials in memory
+    Note over Proxy: Creates  its own temporary MCP code
+
+    Proxy->>VSCode: Redirect to vscode.dev/redirect?code=<MCP code>
+    VSCode->>Proxy: POST /token with MCP code
+    Proxy-->>VSCode: MCP access token (opaque, 1h TTL)
+
+    VSCode->>MCPServer: Connect to /mcp with MCP token
+    Note over MCPServer,Proxy: MCP token → APS token
+
+    MCPServer->>APS: Call Data Management API with APS token
+    APS-->>MCPServer: data
+    MCPServer-->>VSCode: tool result
