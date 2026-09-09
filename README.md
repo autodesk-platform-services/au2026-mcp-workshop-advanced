@@ -22,11 +22,20 @@ There is no build step. `mcp.js` reads `viewer.html` from disk at module load, a
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 24+
 - An APS application with `data:read` scope ([create one here](https://aps.autodesk.com/myapps)), with a **Callback URL** of `<PUBLIC_URL>/auth/callback`
 - An Autodesk Forma hub your APS app is provisioned to, and membership of at least one project in it — the 3-legged flow uses *your* permissions
 
 ## Setup
+
+Create a `.env` file at the project root:
+
+```text
+APS_CLIENT_ID=your-client-id
+APS_CLIENT_SECRET=your-client-secret
+```
+
+Then:
 
 ```bash
 npm install
@@ -40,13 +49,15 @@ npm start
 | `PORT` | no | `3000` |
 | `PUBLIC_URL` | no | `http://localhost:<PORT>` |
 
-`PUBLIC_URL` must match the **Callback URL** registered on the APS app, because the OAuth callback is served at `${PUBLIC_URL}/auth/callback`. In a Codespace, use the forwarded URL for port `3000` and set that port's visibility to **public** so the redirect can reach it.
+The `start` script loads `.env` via Node's `--env-file-if-exists` flag, so any of these can go there. `.env` is gitignored; the code only ever reads `process.env`. Where the variables are already in the environment — a Codespace with repository secrets, a container — no `.env` is needed and Node skips it.
+
+`PUBLIC_URL` must match the **Callback URL** registered on the APS app, because the OAuth callback is served at `${PUBLIC_URL}/auth/callback`. Running locally, that's `http://localhost:3000/auth/callback` and the default `PUBLIC_URL` is already correct. In a Codespace, set `PUBLIC_URL` to the forwarded URL for port `3000`, register the matching callback, and set that port's visibility to **public** so the redirect can reach it.
 
 ## VS Code integration
 
 `.vscode/mcp.json` registers the server as **APS MCP Server (Advanced)** over HTTP at `http://localhost:3000/mcp`. Start the server first, then register it from that file — Copilot connects over the network rather than launching the process itself.
 
-Because `/mcp` is guarded by bearer auth, a spec-compliant client discovers the sign-in flow from the `401` challenge and opens a browser prompt on its own. `.vscode/launch.json` runs the same entry point under the Node debugger, with `PUBLIC_URL` derived from the Codespace's forwarded hostname; delete its `env` block when running locally.
+Because `/mcp` is guarded by bearer auth, a spec-compliant client discovers the sign-in flow from the `401` challenge and opens a browser prompt on its own. `.vscode/launch.json` runs the same entry point under the Node debugger, reading credentials from `.env` via `envFile`. In a Codespace, drop that `envFile` line and point both files at the forwarded hostname instead — see [Part 2 of the tutorial](docs/2-http-transport.md).
 
 ## Architecture
 

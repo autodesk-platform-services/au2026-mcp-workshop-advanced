@@ -3,8 +3,11 @@
   "version": "1.0.0",
   "description": "APS MCP Workshop — Advanced Session (AU2026)",
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "start": "node index.js"
+    "start": "node --env-file-if-exists=.env index.js"
   },
   "dependencies": {
     "@aps_sdk/authentication": "^1.0.0",

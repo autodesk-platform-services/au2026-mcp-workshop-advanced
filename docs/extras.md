@@ -13,11 +13,11 @@ Some features worth tackling this way:
 - **Persisted auth.** A server restart drops every `UserAuthenticationProvider` along with the proxy's in-memory session maps, so every client has to sign in again. Persist the refresh token (encrypted, e.g. Redis/SQLite) against a durable user identity, and rehydrate on startup so a restart doesn't sign everyone out.
 - **Production-grade multi-user auth.** [Part 3](3-user-auth.md) gives each MCP token its own `UserAuthenticationProvider`, which is enough to stop two chats sharing one login — but it keys those sessions on the token it minted rather than a stable user identity, and the proxy itself is explicitly workshop-grade. See [Real per-user auth with Auth0](#real-per-user-auth-with-auth0) below for a production-oriented alternative built on a dedicated identity provider.
 - **Smarter viewer context.** When the user selects an element, look it up via the Model Derivative properties API and feed a richer description back through `updateModelContext`.
-- **Public deployment.** Put the server behind a stable hostname and update the APS app's Callback URL, so it survives longer than a Codespace. `npm install && npm start` is the whole image entrypoint.
+- **Public deployment.** Put the server behind a stable hostname and update the APS app's Callback URL, so clients other than your own machine can reach it. `npm install && npm start` is the whole image entrypoint.
 
 ### Suggested workflow
 
-1. Install Spec-Kit into your repo. From the project root in your Codespace, run:
+1. Install Spec-Kit into your repo. From the project root, run:
 
    ```bash
    uvx --from git+https://github.com/github/spec-kit.git specify init --here --ai copilot
@@ -131,7 +131,7 @@ The repo's own README has the full walkthrough; the shape of it:
 2. **APS app.** Reuse the one from this workshop, adding `https://<PUBLIC_HOST>/auth/callback` as a callback URL if it isn't already registered.
 3. **Environment variables.** `APS_CLIENT_ID`, `APS_CLIENT_SECRET`, `AUTH0_DOMAIN`, and `PUBLIC_HOST` (every derived URL and the Auth0 audience come from this one value).
 
-> **This one can't run on `localhost`.** Auth0 needs a publicly reachable HTTPS audience and callback, so `PUBLIC_HOST` must be a real hostname — a forwarded Codespace port works, same as `PUBLIC_URL` does here.
+> **This one can't run on `localhost`.** Auth0 needs a publicly reachable HTTPS audience and callback, so `PUBLIC_HOST` must be a real hostname. A forwarded Codespace port is the quickest way to get one; a tunnelling tool pointed at your local port `3000` works too.
 
 ## Production checklist
 
@@ -143,7 +143,7 @@ The advanced server is much closer to a real product than a STDIO prototype, but
 | APS identity | One `UserAuthenticationProvider` per MCP token minted by `proxy.js` — isolated per authorization, but with no stable user behind it | `Map<userId, UserAuthenticationProvider>`, keyed by the user ID the authorization server asserts on each request |
 | Refresh tokens | Held in memory only | Encrypted persistence so users don't re-auth on restart |
 | Multi-tenant safety | Per-token isolation, no durable user identity, no per-user limits | Per-user isolation via the identity map above, plus rate limiting, audit logs |
-| Callback URL | A forwarded Codespace URL that changes with the Codespace | HTTPS-only URL on a stable hostname, registered in APS |
+| Callback URL | `http://localhost:3000/auth/callback`, or a forwarded Codespace URL that changes with the Codespace | HTTPS-only URL on a stable hostname, registered in APS |
 | Host/origin validation | `createMcpExpressApp({ host: '0.0.0.0' })`, no allowlist (required for Codespace port forwarding) | Pass `allowedHosts` / `allowedOrigins` (or bind to a fixed hostname) once you have a stable public domain |
 | Viewer CSP | Permissive `connectDomains` | Tighten to only the endpoints the APS Viewer actually uses |
 | Error handling | Errors logged to stderr | Structured logging, alerting, retry/backoff for APS calls |

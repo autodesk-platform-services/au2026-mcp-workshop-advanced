@@ -503,17 +503,17 @@ export function createMcpServer(authenticationProvider) {
 
 ## Try it out
 
-Start with the two discovery documents — they isolate the OAuth mechanics from anything Copilot-specific. Restart the server (`npm start`), then open each URL below in a browser tab, replacing `<PUBLIC_URL>` with your forwarded Codespace URL. Use the public URL, not `localhost`: it exercises the same address an MCP client will read these documents from.
+Start with the two discovery documents — they isolate the OAuth mechanics from anything Copilot-specific. Restart the server (`npm start`), then open each URL below in a browser tab, replacing `<PUBLIC_URL>` with your server's public URL — `http://localhost:3000` when you run it locally. Whatever you use here must be the same address an MCP client reads these documents from.
 
 1. `<PUBLIC_URL>/.well-known/oauth-authorization-server`
 
-   You should see `authorization_endpoint`, `token_endpoint`, and `client_id_metadata_document_supported: true`. Check that the two endpoints are built on your public URL rather than `localhost` — a client outside the Codespace can only reach the public one.
+   You should see `authorization_endpoint`, `token_endpoint`, and `client_id_metadata_document_supported: true`. Check that the two endpoints are built on the address the client will use — that's what `PUBLIC_URL` controls.
 
 2. `<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp`
 
    Expect `resource` to be your `/mcp` URL and `authorization_servers` to list this server itself. Note the path: [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728) puts the resource's own path *after* the well-known segment.
 
-   If either tab shows a GitHub sign-in page instead of JSON, port 3000 is still private. Set its visibility to **Public** in the **Ports** panel.
+   > **Using a Codespace?** Use the forwarded address, not `localhost` — a client outside the Codespace can only reach the public one. If either tab shows a GitHub sign-in page instead of JSON, port `3000` is still private. Set its visibility to **Public** in the **Ports** panel.
 
 3. Call `/mcp` without a token, from a second terminal:
 
@@ -533,7 +533,7 @@ Common failure states:
 
 - **`invalid_request` / "Unknown client_id or redirect_uri" instead of a redirect to Autodesk.** The `/authorize` guard rejected the request. The `client_id` must be an `https://` URL, and the `redirect_uri` must appear in the document that URL serves. Some MCP clients still use classic dynamic client registration, which this proxy doesn't support; VS Code and `npx @modelcontextprotocol/inspector` both support CIMD.
 - **Autodesk rejects the login with a redirect URI mismatch.** `PUBLIC_URL` and the APS app's **Callback URL** disagree. Compare them character for character.
-- **Autodesk sign-in succeeds but VS Code keeps waiting, or the page it lands on says "Unauthorized: No valid session for this codespace".** Codespaces port forwarding sits between the browser and the redirect, and it can interfere with the OAuth flow in ways that are hard to pin down — the browser editor failed to take the redirect back, so the authorization code never reached the client. This is more common when running VS Code in the browser. Fetch the code to your own machine, run the MCP server on `localhost` (set `PUBLIC_URL` to `http://localhost:3000` and update the APS app's Callback URL to match), and sign in from the VS Code desktop app — with the whole flow local, there's no forwarded port left to interfere.
+- **Autodesk sign-in succeeds but VS Code keeps waiting, or the page it lands on says "Unauthorized: No valid session for this codespace".** Codespace-only. Port forwarding sits between the browser and the redirect, and it can interfere with the OAuth flow in ways that are hard to pin down — the browser editor failed to take the redirect back, so the authorization code never reached the client. This is the reason the workshop runs locally by default. Clone your repository to your own machine, run the MCP server on `localhost` (`PUBLIC_URL` falls back to `http://localhost:3000`; update the APS app's Callback URL to match), and sign in from the VS Code desktop app. With the whole flow local, there's no forwarded port left to interfere.
 - **`Not authenticated` from a tool.** The server restarted, taking every session with it. Reconnect the MCP server in VS Code to sign in again.
 
 ## Additional resources

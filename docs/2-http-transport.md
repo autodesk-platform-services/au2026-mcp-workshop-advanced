@@ -48,26 +48,41 @@ What this does:
 - Errors thrown inside a tool handler come back as proper JSON-RPC errors, so there's no `try`/`catch` here.
 - `PUBLIC_URL` is only used in the log line for now. Part 3 needs it for the OAuth callback and Part 4 for the viewer's security policy.
 
-> **"Binding to 0.0.0.0 without DNS rebinding protection" warning.** Expected, not an error. Codespace port forwarding needs the server listening on all interfaces, and the warning is a reminder that host and origin checks are off outside `localhost`. The [Extras](extras.md) production checklist covers locking this down.
+> **"Binding to 0.0.0.0 without DNS rebinding protection" warning.** Expected, not an error. Binding to all interfaces is what lets Codespace port forwarding reach the server, and the warning is a reminder that host and origin checks are off outside `localhost`. Harmless on your own machine. The [Extras](extras.md) production checklist covers locking this down.
 
 ## Step 2: Update mcp.json
 
-`.vscode/mcp.json` currently points at a STDIO command. Replace it with an HTTP entry:
+`.vscode/mcp.json` currently points at a STDIO command. Replace the whole file with an HTTP entry:
 
 ```json
 {
   "servers": {
     "APS MCP Server (Advanced)": {
       "type": "http",
-      "url": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}/mcp"
+      "url": "http://localhost:3000/mcp"
     }
   }
 }
 ```
 
-The URL is built from two variables Codespaces sets automatically, and resolves to the forwarded address of port `3000`. Use that rather than `localhost:3000`: Part 3 publishes the same address as the server's identity in its OAuth metadata, and the client needs to reach the server where that metadata says it is.
+The `envFile` line from Part 1 is gone with it, and doesn't come back. VS Code no longer starts the process, so it has nothing to pass an environment to — the server is already running under its own when a client connects.
 
-> **Working locally?** Use `http://localhost:3000/mcp` — those two variables only exist in a Codespace.
+The URL must be the same address the server publishes as its own identity — Part 3 puts it in the server's OAuth metadata, and the client has to reach the server where that metadata says it is. Running locally, that's `http://localhost:3000`, which is also what `PUBLIC_URL` falls back to.
+
+> **Using a Codespace?** The server is only reachable through the forwarded address of port `3000`, so use that instead:
+>
+> ```json
+> {
+>   "servers": {
+>     "APS MCP Server (Advanced)": {
+>       "type": "http",
+>       "url": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}/mcp"
+>     }
+>   }
+> }
+> ```
+>
+> Those two variables are set by Codespaces automatically, so the URL resolves without hard-coding your Codespace name.
 
 ## Step 3: Setup debugging
 
@@ -85,39 +100,46 @@ The URL is built from two variables Codespaces sets automatically, and resolves 
                 "<node_internals>/**"
             ],
             "program": "${workspaceFolder}/index.js",
-            "env": {
-                "PUBLIC_URL": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
-            }
+            "envFile": "${workspaceFolder}/.env"
         }
     ]
 }
 ```
 
-The `env` block builds the public URL from the same two variables, so the debugger gets the value your terminal will get in Step 4.
+`envFile` points the debugger at the `.env` you created in Part 1, so <kbd>F5</kbd> gets the same `APS_CLIENT_ID` and `APS_CLIENT_SECRET` as `npm start`. The two use different mechanisms for the same file — the `--env-file-if-exists` flag in the `start` script, and this setting in the debugger — because neither launcher knows about the other.
 
-`APS_CLIENT_ID` and `APS_CLIENT_SECRET` are already in the Codespace environment, so the debugger inherits them.
+`launch.json` is committed to your repository, so it names the file rather than the values. Never put credentials in it.
 
-> **Working locally?** Delete the `env` block — those two variables don't exist outside a Codespace, and `PUBLIC_URL` then falls back to `http://localhost:3000`.
+> **Using a Codespace?** Change two things. Drop the `envFile` line — there is no `.env` to read, and the debugger fails outright on a missing one; your credentials come from the Codespace secrets, which the debugger inherits anyway. Then add an `env` block, because the server has to publish its forwarded address rather than `localhost`:
+>
+> ```json
+> "program": "${workspaceFolder}/index.js",
+> "env": {
+>     "PUBLIC_URL": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+> }
+> ```
 
-## Step 4: Run server in Codespace
+## Step 4: Run the server
 
-The OAuth flow in Part 3 sends your browser to Autodesk and back again, so the server needs a URL reachable from outside the Codespace. Codespaces gives you one by forwarding port `3000`.
+The OAuth flow in Part 3 sends your browser to Autodesk and back again, so the server needs an address your browser can reach. Running locally, that's `http://localhost:3000`.
 
 1. Press <kbd>F5</kbd> (or pick **Launch MCP Server** in the **Run and Debug** panel) to start the server with the debugger attached.
 
 2. Open the **Debug Console** panel (bottom panel → **Debug Console** tab).
 
-  You should see something like `MCP server listening on https://fuzzy-octo-robot-abc123-3000.app.github.dev/mcp`. The part before `/mcp` is your server's public address. Keep it around as we'll need it later.
+   You should see `MCP server listening on http://localhost:3000/mcp`. If instead it exits with `APS_CLIENT_ID and APS_CLIENT_SECRET environment variables are required.`, the debugger didn't pick up your credentials — check that `.env` exists at the project root and that `envFile` points at it.
 
-3. Open the **Ports** panel (bottom panel → **Ports** tab). Port `3000` appears automatically once the server is listening. Right-click it and choose **Port Visibility → Public**.
-
-   Without this, anyone accessing your MCP server from outside of the Codespace would get a GitHub login page.
-
-4. Register the callback URL with your APS app. Open your APS application on the developer portal and set **Callback URL** to your server's public URL plus `/auth/callback`, for example, `https://fuzzy-octo-robot-abc123-3000.app.github.dev/auth/callback`.
+3. Register the callback URL with your APS app. Open your APS application on the developer portal and set **Callback URL** to your server's public URL plus `/auth/callback` — `http://localhost:3000/auth/callback`.
 
    APS accepts several callback URLs, so you can keep others alongside it. This value must match `PUBLIC_URL` exactly — same scheme, same host, no trailing slash difference.
 
-> **Codespace URLs are per-Codespace.** Delete the Codespace and create a new one, and the hostname changes. When that happens, repeat steps 1, 3 and 4.
+> **Using a Codespace?** Two extra steps, because the browser reaches your server through a forwarded port rather than directly.
+>
+> - The Debug Console prints the forwarded address instead, something like `MCP server listening on https://fuzzy-octo-robot-abc123-3000.app.github.dev/mcp`. The part before `/mcp` is your server's public address — keep it around.
+> - Open the **Ports** panel (bottom panel → **Ports** tab). Port `3000` appears automatically once the server is listening. Right-click it and choose **Port Visibility → Public**. Without this, anything reaching your server from outside the Codespace gets a GitHub login page instead.
+> - Use that forwarded address in step 3, so the **Callback URL** reads `https://fuzzy-octo-robot-abc123-3000.app.github.dev/auth/callback`.
+>
+> The hostname belongs to the Codespace. Delete it and create a new one, and the address changes — repeat this step, including the APS registration.
 
 > **`EADDRINUSE: address already in use :::3000`.** Another server is still running — usually a debug session or a forgotten terminal. Find it and stop it:
 >
@@ -126,7 +148,7 @@ The OAuth flow in Part 3 sends your browser to Autodesk and back again, so the s
 > kill <PID>
 > ```
 >
-> Or in one line: `kill $(lsof -t -i:3000)`.
+> Or in one line: `kill $(lsof -t -i:3000)`. On Windows, `netstat -ano | findstr :3000` then `taskkill /PID <PID> /F`.
 
 ## Checkpoint
 
@@ -135,7 +157,7 @@ You should now have:
 - [x] `index.js` serving an Express app at `/mcp`
 - [x] `.vscode/mcp.json` pointing Copilot at the HTTP endpoint
 - [x] `.vscode/launch.json` with a **Launch MCP Server** configuration
-- [x] Port `3000` forwarded and public
+- [x] The server listening on `http://localhost:3000` (or, in a Codespace, on a forwarded port `3000` set to **Public**)
 - [x] A **Callback URL** on your APS app matching `PUBLIC_URL`
 
 ## Try it out
@@ -152,7 +174,9 @@ The results are still scoped to the application, not to you — that's what Part
 > npx @modelcontextprotocol/inspector http://localhost:3000/mcp
 > ```
 >
-> It starts a web UI on port `6274`, which VS Code adds to the **Ports** panel automatically. Click the globe icon next to the forwarded address to open it. The Inspector shows the raw JSON-RPC traffic and lets you invoke tools by hand — the fastest way to tell a transport problem from a tool problem.
+> It starts a web UI on port `6274` and opens it in your browser. The Inspector shows the raw JSON-RPC traffic and lets you invoke tools by hand — the fastest way to tell a transport problem from a tool problem.
+>
+> In a Codespace, VS Code adds port `6274` to the **Ports** panel automatically; click the globe icon next to the forwarded address to open it.
 
 ## Additional resources
 

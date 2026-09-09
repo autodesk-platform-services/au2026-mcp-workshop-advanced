@@ -19,31 +19,33 @@ Then, create a new **Traditional Web App** application:
 
 - [Create app credentials](https://get-started.aps.autodesk.com/#create-app-credentials)
 
-Copy the **Client ID** and **Client Secret** — you'll need both. Leave the **Callback URL** for now. It has to match the public URL of your server, which you only learn once your GitHub Codespace is running. Part 2 walks you through registering it.
+Copy the **Client ID** and **Client Secret** — you'll need both. Leave the **Callback URL** for now. It has to match the public URL of your server, which is `http://localhost:3000` when you run the server on your own machine. Part 2 walks you through registering it.
 
 ## Access to Forma
 
 An administrator must add your APS application to a Forma hub under **Hub Admin → Custom Integrations**. Because the new MCP server acts on behalf of *a user*, you also need to be **a member of at least one project in that hub** — otherwise the tools return an empty list even though the code works correctly.
 
-## Visual Studio Code
+## Development environment
 
-Install the [Visual Studio Code desktop app](https://code.visualstudio.com/) and the [GitHub Codespaces extension](https://marketplace.visualstudio.com/items?itemName=GitHub.codespaces).
+You'll run the MCP server on your own machine.
 
-You'll work in the browser editor your Codespace provides, so you most likely won't need either. Have them installed anyway. The sign-in flow in Part 3 hands control to your browser and back, and when that round trip stalls, connecting to the same Codespace from the desktop app is the quickest way past it.
+Install all three:
 
-## GitHub, Codespaces, Copilot
+1. The [Visual Studio Code desktop app](https://code.visualstudio.com/).
+2. [Node.js 24 or newer](https://nodejs.org/). Check what you have:
 
-Sign in to [GitHub](https://github.com), then confirm both services are actually enabled on your account. A missing entitlement is the one problem you can't fix during the session, so check rather than assume.
+   ```bash
+   node --version
+   ```
 
-### Codespaces
+   Anything below `v24.0.0` needs upgrading. The code, SDKs, and tools we use in this workshop expect a current runtime.
+3. [Git](https://git-scm.com/downloads), to clone the starting code in Part 1.
 
-The workshop runs in a Codespace for two reasons. It gives everyone the same environment, with Node.js and the tooling already in place. And it can make your server available via a public URL which will be useful for testing the OAuth flows, and potentially for exploring other MCP clients.
+> **Can't install VS Code or Node.js on your machine?** Some corporate laptops block one or both. You can run the whole workshop in a [GitHub Codespace](https://github.com/codespaces) instead — Part 1 has the steps, and every later part carries a side-note wherever the Codespace path differs. Check first that Codespaces is enabled for your account: open [github.com/codespaces](https://github.com/codespaces) and look for a **New codespace** button, then open [github.com/settings/billing](https://github.com/settings/billing) and confirm you have included hours left. The workshop uses about two hours on a 2-core machine. If an organisation policy blocks Codespaces, use a personal GitHub account.
 
-1. Open [github.com/codespaces](https://github.com/codespaces). A **New codespace** button means Codespaces is enabled for your account. An error page, or no button, means it isn't.
-2. Open [github.com/settings/billing](https://github.com/settings/billing) and find the **Codespaces** usage. The free tier's included hours are enough — the workshop uses about two hours on a 2-core machine — but you need some left.
-3. If the button is missing because an organisation policy blocks Codespaces, use a personal GitHub account for the workshop.
+## GitHub and Copilot
 
-You don't need to create a Codespace yet. Part 1 does that.
+Sign in to [GitHub](https://github.com), then confirm Copilot is actually enabled on your account. A missing entitlement is the one problem you can't fix during the session, so check rather than assume.
 
 ### Copilot
 
@@ -56,9 +58,14 @@ You don't need to create a Codespace yet. Part 1 does that.
 You're ready when:
 
 - [x] You have an APS **Client ID** and **Client Secret**
-- [x] VS Code desktop is installed, with the **GitHub Codespaces** extension, in case you need it
 - [x] You are a member of at least one project in the Forma hub your APS app is provisioned to
-- [x] [github.com/codespaces](https://github.com/codespaces) offers you a **New codespace** button, with included hours remaining
+- [x] VS Code desktop is installed
+- [x] `node --version` reports `v24.0.0` or newer
+- [x] `git --version` reports a version
 - [x] Copilot answers a prompt at [github.com/copilot](https://github.com/copilot), and Copilot Chat in VS Code offers **Agent** mode
+
+Falling back to a Codespace? Then instead of the VS Code, Node.js and Git rows:
+
+- [x] [github.com/codespaces](https://github.com/codespaces) offers you a **New codespace** button, with included hours remaining
 
 The workshop instructor will do a quick setup check at the start of the session.
