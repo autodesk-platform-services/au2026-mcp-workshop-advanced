@@ -23,13 +23,20 @@ Then open the folder in VS Code, either with **File → Open Folder** or from th
 code .
 ```
 
-> **Using a Codespace instead?** Add your credentials as repository secrets **before** you create the Codespace, because secrets are only injected at start-up.
->
-> 1. In your fork on GitHub, go to **Settings → Secrets and variables → Codespaces**.
-> 2. Click **New repository secret** and add `APS_CLIENT_ID` and `APS_CLIENT_SECRET`, with your APS application's client ID and client secret as the values.
-> 3. Then click **Code → Codespaces → Create codespace on main**. It opens VS Code in the browser with the repository checked out, Node.js installed, and both variables already in the environment.
->
-> That covers Step 3 as well — skip it and go straight to Step 4. If you created the Codespace before adding the secrets, stop it and start it again so the new values reach the environment.
+<details>
+    <summary>
+        Codespaces
+    </summary>
+
+Add your credentials as repository secrets **before** you create the Codespace, because secrets are only injected at start-up.
+
+1. In your fork on GitHub, go to **Settings → Secrets and variables → Codespaces**.
+2. Click **New repository secret** and add `APS_CLIENT_ID` and `APS_CLIENT_SECRET`, with your APS application's client ID and client secret as the values.
+3. Then click **Code → Codespaces → Create codespace on main**. It opens VS Code in the browser with the repository checked out, Node.js installed, and both variables already in the environment.
+
+That covers Step 3 as well — skip it and go straight to Step 4. If you created the Codespace before adding the secrets, stop it and start it again so the new values reach the environment.
+
+</details>
 
 ## Step 3: Set your APS credentials
 
@@ -46,7 +53,14 @@ Nothing reads this file yet — Step 4 adds the `--env-file-if-exists` flag that
 
 > **`.env` holds a secret. Never commit it.** The repository's `.gitignore` already lists `.env`, so Git ignores it. Confirm with `git status` — if `.env` shows up as untracked, something removed that line and you should put it back before your next commit.
 
-> **Using a Codespace?** Skip this step. Your credentials arrive from the repository secrets you set in Step 2, and there is no `.env` file to create.
+<details>
+    <summary>
+        Codespaces
+    </summary>
+
+Skip this step. Your credentials arrive from the repository secrets you set in Step 2, and there is no `.env` file to create.
+
+</details>
 
 ## Step 4: Update package.json
 
@@ -132,7 +146,14 @@ It should print your client ID. That's the same flag your `start` script uses, s
 
 If it prints `undefined`, revisit Step 3. Check that `.env` sits at the project root next to `package.json`, that the variable names are spelled exactly as above, and that there are no spaces around the `=`.
 
-> **Using a Codespace?** The same command works — Node skips the missing `.env` and reads the variables the Codespace injected. If it prints `undefined`, the Codespace was created before the secrets were added. Stop it and start it again.
+<details>
+    <summary>
+        Codespaces
+    </summary>
+
+The same command works — Node skips the missing `.env` and reads the variables the Codespace injected. If it prints `undefined`, the Codespace was created before the secrets were added. Stop it and start it again.
+
+</details>
 
 ### 2. Point the MCP config at your .env
 
@@ -167,7 +188,14 @@ VS Code launches `node index.js` as a child process, and nothing in that command
 
 > **Temporary.** Part 2 replaces this whole file with an HTTP entry. An HTTP server is already running under its own environment by the time a client connects, so it needs no `envFile`.
 
-> **Using a Codespace?** Leave the file as it is — the child process inherits the credentials from the environment VS Code is already running in.
+<details>
+    <summary>
+        Codespaces
+    </summary>
+
+Leave the file as it is — the child process inherits the credentials from the environment VS Code is already running in.
+
+</details>
 
 ### 3. Start the server
 

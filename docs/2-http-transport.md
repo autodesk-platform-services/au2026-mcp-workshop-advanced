@@ -69,20 +69,27 @@ The `envFile` line from Part 1 is gone with it, and doesn't come back. VS Code n
 
 The URL must be the same address the server publishes as its own identity — Part 3 puts it in the server's OAuth metadata, and the client has to reach the server where that metadata says it is. Running locally, that's `http://localhost:3000`, which is also what `PUBLIC_URL` falls back to.
 
-> **Using a Codespace?** The server is only reachable through the forwarded address of port `3000`, so use that instead:
->
-> ```json
-> {
->   "servers": {
->     "APS MCP Server (Advanced)": {
->       "type": "http",
->       "url": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}/mcp"
->     }
->   }
-> }
-> ```
->
-> Those two variables are set by Codespaces automatically, so the URL resolves without hard-coding your Codespace name.
+<details>
+    <summary>
+        Codespaces
+    </summary>
+
+The server is only reachable through the forwarded address of port `3000`, so use that instead:
+
+```json
+{
+  "servers": {
+    "APS MCP Server (Advanced)": {
+      "type": "http",
+      "url": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}/mcp"
+    }
+  }
+}
+```
+
+Those two variables are set by Codespaces automatically, so the URL resolves without hard-coding your Codespace name.
+
+</details>
 
 ## Step 3: Setup debugging
 
@@ -110,14 +117,21 @@ The URL must be the same address the server publishes as its own identity — Pa
 
 `launch.json` is committed to your repository, so it names the file rather than the values. Never put credentials in it.
 
-> **Using a Codespace?** Change two things. Drop the `envFile` line — there is no `.env` to read, and the debugger fails outright on a missing one; your credentials come from the Codespace secrets, which the debugger inherits anyway. Then add an `env` block, because the server has to publish its forwarded address rather than `localhost`:
->
-> ```json
-> "program": "${workspaceFolder}/index.js",
-> "env": {
->     "PUBLIC_URL": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
-> }
-> ```
+<details>
+    <summary>
+        Codespaces
+    </summary>
+
+Change two things. Drop the `envFile` line — there is no `.env` to read, and the debugger fails outright on a missing one; your credentials come from the Codespace secrets, which the debugger inherits anyway. Then add an `env` block, because the server has to publish its forwarded address rather than `localhost`:
+
+```json
+"program": "${workspaceFolder}/index.js",
+"env": {
+    "PUBLIC_URL": "https://${env:CODESPACE_NAME}-3000.${env:GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}"
+}
+```
+
+</details>
 
 ## Step 4: Run the server
 
@@ -133,13 +147,20 @@ The OAuth flow in Part 3 sends your browser to Autodesk and back again, so the s
 
    APS accepts several callback URLs, so you can keep others alongside it. This value must match `PUBLIC_URL` exactly — same scheme, same host, no trailing slash difference.
 
-> **Using a Codespace?** Two extra steps, because the browser reaches your server through a forwarded port rather than directly.
->
-> - The Debug Console prints the forwarded address instead, something like `MCP server listening on https://fuzzy-octo-robot-abc123-3000.app.github.dev/mcp`. The part before `/mcp` is your server's public address — keep it around.
-> - Open the **Ports** panel (bottom panel → **Ports** tab). Port `3000` appears automatically once the server is listening. Right-click it and choose **Port Visibility → Public**. Without this, anything reaching your server from outside the Codespace gets a GitHub login page instead.
-> - Use that forwarded address in step 3, so the **Callback URL** reads `https://fuzzy-octo-robot-abc123-3000.app.github.dev/auth/callback`.
->
-> The hostname belongs to the Codespace. Delete it and create a new one, and the address changes — repeat this step, including the APS registration.
+<details>
+    <summary>
+        Codespaces
+    </summary>
+
+Two extra steps, because the browser reaches your server through a forwarded port rather than directly.
+
+- The Debug Console prints the forwarded address instead, something like `MCP server listening on https://fuzzy-octo-robot-abc123-3000.app.github.dev/mcp`. The part before `/mcp` is your server's public address — keep it around.
+- Open the **Ports** panel (bottom panel → **Ports** tab). Port `3000` appears automatically once the server is listening. Right-click it and choose **Port Visibility → Public**. Without this, anything reaching your server from outside the Codespace gets a GitHub login page instead.
+- Use that forwarded address in step 3, so the **Callback URL** reads `https://fuzzy-octo-robot-abc123-3000.app.github.dev/auth/callback`.
+
+The hostname belongs to the Codespace. Delete it and create a new one, and the address changes — repeat this step, including the APS registration.
+
+</details>
 
 > **`EADDRINUSE: address already in use :::3000`.** Another server is still running — usually a debug session or a forgotten terminal. Find it and stop it:
 >

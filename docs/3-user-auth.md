@@ -513,7 +513,14 @@ Start with the two discovery documents — they isolate the OAuth mechanics from
 
    Expect `resource` to be your `/mcp` URL and `authorization_servers` to list this server itself. Note the path: [RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728) puts the resource's own path *after* the well-known segment.
 
-   > **Using a Codespace?** Use the forwarded address, not `localhost` — a client outside the Codespace can only reach the public one. If either tab shows a GitHub sign-in page instead of JSON, port `3000` is still private. Set its visibility to **Public** in the **Ports** panel.
+   <details>
+       <summary>
+           Codespaces
+       </summary>
+
+   Use the forwarded address, not `localhost` — a client outside the Codespace can only reach the public one. If either tab shows a GitHub sign-in page instead of JSON, port `3000` is still private. Set its visibility to **Public** in the **Ports** panel.
+
+   </details>
 
 3. Call `/mcp` without a token, from a second terminal:
 
