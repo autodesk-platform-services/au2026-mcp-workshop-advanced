@@ -141,8 +141,6 @@ body {
 .sidebar ul li.active > a:focus {
     border-left-color: transparent;
     border-left-width: 2px;
-    padding-left: 0.75rem;
-    margin-left: 0;
     transform: none;
 }
 
@@ -168,9 +166,23 @@ body {
     border-left-width: 4px;
 }
 
+.markdown-section table {
+    table-layout: fixed;
+    width: 100%;
+}
+
 .markdown-section table th,
 .markdown-section table td {
     padding: 0.5rem 0.625rem;
+    overflow-wrap: break-word;
+}
+
+/* Inline code defaults to nowrap, which lets one long snippet (e.g. a
+   generic type like Map<userId, UserAuthenticationProvider>) force the
+   whole content column to overflow horizontally instead of wrapping. */
+.markdown-section code {
+    white-space: normal !important;
+    word-break: break-word !important;
 }
 
 .markdown-section pre {

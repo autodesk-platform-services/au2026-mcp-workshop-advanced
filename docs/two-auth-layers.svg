@@ -1,0 +1,59 @@
+<svg viewBox="0 0 2000 900" xmlns="http://www.w3.org/2000/svg" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#000000"/>
+    </marker>
+  </defs>
+
+  <!-- Top row: MCP Client -> Your MCP Server -> Upstream API -->
+  <rect x="40" y="90" width="420" height="140" rx="16" fill="#ffffff" stroke="#000000" stroke-width="3"/>
+  <text x="250" y="150" text-anchor="middle" font-size="30" font-weight="700" fill="#000000">VS Code</text>
+  <text x="250" y="188" text-anchor="middle" font-size="24" fill="#000000">(MCP Client)</text>
+
+  <rect x="1590" y="90" width="370" height="140" rx="16" fill="#ffffff" stroke="#000000" stroke-width="3"/>
+  <text x="1775" y="170" text-anchor="middle" font-size="30" font-weight="700" fill="#000000">Upstream API</text>
+
+  <rect x="770" y="90" width="460" height="140" rx="16" fill="#000000"/>
+  <text x="1000" y="170" text-anchor="middle" font-size="30" font-weight="700" fill="#ffffff">Your MCP Server</text>
+
+  <line x1="460" y1="160" x2="768" y2="160" stroke="#000000" stroke-width="4" marker-end="url(#arrow)"/>
+  <line x1="1230" y1="160" x2="1588" y2="160" stroke="#000000" stroke-width="4" marker-end="url(#arrow)"/>
+
+  <rect x="490" y="18" width="280" height="60" fill="#1d91d0"/>
+  <text x="630" y="58" text-anchor="middle" font-size="26" font-weight="700" fill="#ffffff">Layer 1</text>
+
+  <rect x="1260" y="18" width="280" height="60" fill="#666666"/>
+  <text x="1400" y="58" text-anchor="middle" font-size="26" font-weight="700" fill="#ffffff">Layer 2</text>
+
+  <!-- Layer 1 detail card -->
+  <rect x="40" y="290" width="960" height="60" fill="#1d91d0"/>
+  <text x="60" y="330" font-size="26" font-weight="700" fill="#ffffff">Layer 1: MCP client &#8596; MCP server</text>
+  <rect x="40" y="350" width="960" height="300" fill="#bfe4f7"/>
+  <g font-size="23" fill="#000000">
+    <text x="70" y="395">&#8226; MCP spec authorization based on OAuth</text>
+    <text x="70" y="430">&#8226; STDIO transport <tspan font-weight="700">SHOULD NOT</tspan> follow</text>
+    <text x="70" y="465">&#8226; Streamable HTTP transport <tspan font-weight="700">SHOULD</tspan> follow</text>
+    <text x="110" y="500">&#8226; MCP client acts as OAuth 2.1 <tspan font-style="italic" font-weight="700">client</tspan></text>
+    <text x="110" y="535">&#8226; MCP server acts as OAuth 2.1 <tspan font-style="italic" font-weight="700">resource server</tspan></text>
+    <text x="110" y="570">&#8226; OAuth <tspan font-style="italic" font-weight="700">authorization server</tspan> ideally with <tspan fill="#1d91d0" text-decoration="underline">CIMD</tspan></text>
+  </g>
+
+  <!-- Layer 2 detail card -->
+  <rect x="1040" y="290" width="920" height="60" fill="#666666"/>
+  <text x="1060" y="330" font-size="26" font-weight="700" fill="#ffffff">Layer 2: MCP server &#8596; Upstream API</text>
+  <rect x="1040" y="350" width="920" height="300" fill="#d5d5cb"/>
+  <g font-size="23" fill="#000000">
+    <text x="1070" y="395">&#8226; If upstream API uses OAuth, too:</text>
+    <text x="1110" y="430">&#8226; MCP server now acts as OAuth <tspan font-style="italic" font-weight="700">client</tspan></text>
+    <text x="1110" y="465">&#8226; Upstream API is OAuth <tspan font-style="italic" font-weight="700">resource server</tspan></text>
+  </g>
+
+  <!-- Anti-patterns -->
+  <rect x="40" y="690" width="1920" height="60" fill="#000000"/>
+  <text x="60" y="730" font-size="26" font-weight="700" fill="#ffff00">Anti-patterns</text>
+  <rect x="40" y="750" width="1920" height="130" fill="#d5d5cb"/>
+  <g font-size="23" fill="#000000">
+    <text x="70" y="795"><tspan font-weight="700">Token passthrough</tspan> &#8211; forwarding the client's token to upstream API</text>
+    <text x="70" y="830"><tspan font-weight="700">Identity collapse</tspan> &#8211; using one shared identity when acting on per-user data</text>
+  </g>
+</svg>

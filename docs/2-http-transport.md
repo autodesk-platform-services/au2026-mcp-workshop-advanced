@@ -43,7 +43,7 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 What this does:
 
 - `createMcpExpressApp` returns an Express app pre-configured for MCP servers, with a JSON body parser already installed. Add your own middleware to it, as we do with `cors()`.
-- `createMcpHandler` takes a factory function (creating MCP servers) and turns it into an HTTP handler that speakss the 2026-07-28 protocol. `toNodeHandler` adapts that handler to the `(req, res)` shape Express expects.
+- `createMcpHandler` takes a factory function (creating MCP servers) and turns it into an HTTP handler that speaks the 2026-07-28 protocol. `toNodeHandler` adapts that handler to the `(req, res)` shape Express expects.
 - Passing `req.body` as the third argument matters: the Express app already parsed the request stream, so the handler must be handed the result rather than trying to parse the input stream again.
 - Errors thrown inside a tool handler come back as proper JSON-RPC errors, so there's no `try`/`catch` here.
 - `PUBLIC_URL` is only used in the log line for now. Part 3 needs it for the OAuth callback and Part 4 for the viewer's security policy.

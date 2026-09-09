@@ -8,7 +8,7 @@ In this section you'll make the server act on behalf of a real Autodesk user ins
 
 There are two independent trust boundaries here:
 
-![Overview of the two auth boundaries](two-auth-layers.png)
+![Overview of the two auth boundaries](two-auth-layers.svg)
 
 - **Your server → APS.** A 3-legged OAuth flow that gets a token representing *a signed-in Autodesk user*, so the tools return that user's hubs, projects and files.
 - **MCP client → your server.** A separate OAuth flow that answers "who is calling `/mcp`?". Right now the endpoint is wide open to anyone who can reach the port, which is a problem the moment it holds a user's session.
@@ -39,7 +39,7 @@ A few things to note:
 - Step 6 is the hinge: the proxy already holds a real APS token from step 5, but VS Code never sees it. It gets a separate, proxy-issued code instead, which step 7 exchanges for its own MCP access token.
 - The final request is the one every tool call makes afterwards: `/mcp` with the MCP access token as a bearer credential, not the APS token.
 
-> **Design note: this is a workshop stand-in, not production-ready.** The proxy you're about to write trades away most of what a real authorization server does: no persistence, no PKCE verification, no client authentication at the token endpoint, no rate limiting, no revocation, no rotation on refresh. All state lives in memory. That's a deliberate trade of robustness for a file you can read in one sitting — don't ship it as-is. A real deployment either builds a purpose-fit proxy with the missing checks, or integrates a dedicated identity provider (Auth0, Okta, Entra ID, …). [Extras](extras.md) links a full reference implementation built on Auth0.
+> **Design note:** This is a workshop stand-in, not production-ready. The proxy you're about to write trades away most of what a real authorization server does: no persistence, no PKCE verification, no client authentication at the token endpoint, no rate limiting, no revocation, no rotation on refresh. All state lives in memory. That's a deliberate trade of robustness for a file you can read in one sitting — don't ship it as-is. A real deployment either builds a purpose-fit proxy with the missing checks, or integrates a dedicated identity provider (Auth0, Okta, Entra ID, …). [Extras](extras.md) links a full reference implementation built on Auth0.
 
 Want to go deeper on MCP auth? Check out the [AU2026 class on this topic](https://conferences.autodesk.com/flow/autodesk/au2026/sessioncatalog/page/inperson/session/1774345141992001PAw3).
 

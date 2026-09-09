@@ -34,11 +34,31 @@ Add your credentials as repository secrets **before** you create the Codespace, 
 2. Click **New repository secret** and add `APS_CLIENT_ID` and `APS_CLIENT_SECRET`, with your APS application's client ID and client secret as the values.
 3. Then click **Code → Codespaces → Create codespace on main**. It opens VS Code in the browser with the repository checked out, Node.js installed, and both variables already in the environment.
 
-That covers Step 3 as well — skip it and go straight to Step 4. If you created the Codespace before adding the secrets, stop it and start it again so the new values reach the environment.
+That covers Step 4 as well, so once you've removed the beginner-only files in Step 3, go straight to Step 5. If you created the Codespace before adding the secrets, stop it and start it again so the new values reach the environment.
 
 </details>
 
-## Step 3: Set your APS credentials
+## Step 3: Remove the beginner-only files
+
+The clone carries the whole beginner session with it, and three of those items have no role in the advanced one:
+
+| Item | Why it goes |
+| --- | --- |
+| `.github/` | The `forma-weekly-update` agent skill, written against the beginner server's two STDIO tools |
+| `docs/` | The beginner tutorial site — you're reading the advanced one |
+| `README.md` | The beginner session's front page |
+
+Delete them:
+
+```bash
+rm -rf .github docs README.md
+```
+
+Everything else stays. `aps.js`, `mcp.js` and `index.js` are the files Parts 2 to 4 rewrite, `.vscode/mcp.json` is the client config you'll repoint at the new transport, and `.gitignore` already lists the `.env` you're about to create.
+
+Nothing in the code imports any of the three, so the server still starts. The deletions show up in `git status` — commit them whenever you like.
+
+## Step 4: Set your APS credentials
 
 Your server reads its APS credentials from environment variables. Locally you'll keep them in a `.env` file at the project root, and let Node.js and the VS Code debugger load it for you. Create `.env`:
 
@@ -49,7 +69,7 @@ APS_CLIENT_SECRET=your-client-secret
 
 No quotes, no `export`, one variable per line. Substitute the **Client ID** and **Client Secret** you copied from your APS application.
 
-Nothing reads this file yet — Step 4 adds the `--env-file-if-exists` flag that loads it on `npm start`, and Part 2 points the debugger at it with `envFile`. The code itself never opens `.env`; it only ever reads `process.env`.
+Nothing reads this file yet — Step 5 adds the `--env-file-if-exists` flag that loads it on `npm start`, and Part 2 points the debugger at it with `envFile`. The code itself never opens `.env`; it only ever reads `process.env`.
 
 > **`.env` holds a secret. Never commit it.** The repository's `.gitignore` already lists `.env`, so Git ignores it. Confirm with `git status` — if `.env` shows up as untracked, something removed that line and you should put it back before your next commit.
 
@@ -62,7 +82,7 @@ Skip this step. Your credentials arrive from the repository secrets you set in S
 
 </details>
 
-## Step 4: Update package.json
+## Step 5: Update package.json
 
 Replace `package.json` with the advanced version:
 
@@ -95,7 +115,7 @@ Two things changed besides the dependencies.
 
 `engines` records the Node.js version this project needs. It is a declaration rather than a hard gate — `npm install` prints an `EBADENGINE` warning on an older runtime and carries on — but it documents the requirement where tooling can read it, and it is the first thing to check when something behaves oddly.
 
-The `start` script gained `--env-file-if-exists=.env`. Node.js reads that file into `process.env` before your code runs, which is what makes the credentials from Step 3 available without exporting anything by hand. The `-if-exists` half matters for the Codespace path: with no `.env` on disk, Node prints a one-line notice and carries on with the variables already in the environment.
+The `start` script gained `--env-file-if-exists=.env`. Node.js reads that file into `process.env` before your code runs, which is what makes the credentials from Step 4 available without exporting anything by hand. The `-if-exists` half matters for the Codespace path: with no `.env` on disk, Node prints a one-line notice and carries on with the variables already in the environment.
 
 Four dependencies are new, all of them server-side:
 
@@ -117,6 +137,7 @@ npm install
 You should now have:
 
 - [x] Your own fork of the starting code, cloned and open in VS Code
+- [x] No `.github/`, `docs/` or `README.md` left over from the beginner session
 - [x] A `.env` file holding `APS_CLIENT_ID` and `APS_CLIENT_SECRET`
 - [x] The advanced `package.json` and a successful `npm install`
 
@@ -144,7 +165,7 @@ node --env-file-if-exists=.env -e "console.log(process.env.APS_CLIENT_ID)"
 
 It should print your client ID. That's the same flag your `start` script uses, so it proves exactly what the server will see.
 
-If it prints `undefined`, revisit Step 3. Check that `.env` sits at the project root next to `package.json`, that the variable names are spelled exactly as above, and that there are no spaces around the `=`.
+If it prints `undefined`, revisit Step 4. Check that `.env` sits at the project root next to `package.json`, that the variable names are spelled exactly as above, and that there are no spaces around the `=`.
 
 <details>
     <summary>
