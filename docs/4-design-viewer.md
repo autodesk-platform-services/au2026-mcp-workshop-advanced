@@ -4,10 +4,10 @@ In this section you'll add a tool that renders an Autodesk design in 3D directly
 
 ## Theory
 
-MCP Apps adds two concepts on top of the server you already have, both expressed as plain `_meta` fields on the `registerTool` and `registerResource` calls you know:
+MCP Apps adds two concepts on top of the server you already have. Both are just `_meta` fields on the same `registerTool` and `registerResource` calls you're already using:
 
 - **App resource** — an MCP resource whose body is an HTML document, identified by a `ui://` URI and marked with a `text/html;profile=mcp-app` MIME type. The client renders it in a sandboxed panel under a content security policy the server declares.
-- **App tool** — a tool that names an app resource in its metadata. When the tool returns, the client shows that resource and forwards the tool's structured result to it.
+- **App tool** — a tool whose metadata points to an app resource. When the client receives the tool's result, it opens that resource in the panel and passes the result to it to render.
 
 The APS Viewer running inside that page needs three things: its own scripts and stylesheet from `developer.api.autodesk.com`, the design's URN, and an access token to access the design's derivatives.
 
@@ -490,6 +490,13 @@ app.listen(PORT, () => console.log(`MCP server listening on ${PUBLIC_URL}/mcp`))
 
 3. Copilot will usually chain calls: `list-hubs-projects` → `list-folder-contents` → `preview-design`. Approve the tool prompts.
 4. The viewer panel appears with the model loaded. Select an object — the chat now knows what's selected and can answer follow-up questions about it.
+
+> **Tip — Sample design files.** If you don't have any testing design files readily available, you can try some of these publicly available ones:
+>
+> - [Revit 2022 sample project files](https://help.autodesk.com/view/RVT/2026/ENU/?guid=GUID-61EF2F22-3A1F-4317-B925-1E85F138BE88)
+> - [AutoCAD Mechanical 2026 sample files](https://www.autodesk.com/support/technical/article/caas/tsarticles/ts/5FT67coP41xn6vjfEgyGQo.html)
+> - [Inventor sample files](https://knowledge.autodesk.com/support/inventor/downloads/caas/downloads/content/inventor-sample-files.html)
+> - [3ds Max sample files](https://knowledge.autodesk.com/support/3ds-max/troubleshooting/caas/downloads/content/3ds-max-2021-sample-files.html)
 
 > **Restart after editing the viewer.** The HTML is read once at startup, so an edit to `viewer.html` is invisible until you restart the server.
 

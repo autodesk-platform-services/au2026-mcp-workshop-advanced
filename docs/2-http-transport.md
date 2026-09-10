@@ -195,6 +195,8 @@ The results are still scoped to the application, not to you — that's what Part
 > npx @modelcontextprotocol/inspector http://localhost:3000/mcp
 > ```
 >
+> Be patient here, it may take some time if you are installing it for the first time.
+>
 > It starts a web UI on port `6274` and opens it in your browser. The Inspector shows the raw JSON-RPC traffic and lets you invoke tools by hand — the fastest way to tell a transport problem from a tool problem.
 >
 > In a Codespace, VS Code adds port `6274` to the **Ports** panel automatically; click the globe icon next to the forwarded address to open it.

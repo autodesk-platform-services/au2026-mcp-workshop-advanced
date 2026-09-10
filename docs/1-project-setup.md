@@ -30,7 +30,7 @@ code .
 
 Add your credentials as repository secrets **before** you create the Codespace, because secrets are only injected at start-up.
 
-1. In your fork on GitHub, go to **Settings → Secrets and variables → Codespaces**.
+1. In your fork on GitHub, click **Settings**. In the left sidebar, look for the **Security and quality** block, expand **Secrets and variables**, and click **Codespaces**.
 2. Click **New repository secret** and add `APS_CLIENT_ID` and `APS_CLIENT_SECRET`, with your APS application's client ID and client secret as the values.
 3. Then click **Code → Codespaces → Create codespace on main**. It opens VS Code in the browser with the repository checked out, Node.js installed, and both variables already in the environment.
 

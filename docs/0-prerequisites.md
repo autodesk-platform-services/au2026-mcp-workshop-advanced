@@ -52,7 +52,7 @@ Some corporate laptops may block VS Code, Node.js, or both. You can run the whol
 
 ## GitHub and Copilot
 
-Sign in to [GitHub](https://github.com), then confirm Copilot is actually enabled on your account. A missing entitlement is the one problem you can't fix during the session, so check rather than assume.
+Sign in to [GitHub](https://github.com), then confirm Copilot is actually enabled on your account — available as an individual subscription or through your organisation. A missing entitlement is the one problem you can't fix during the session, so check rather than assume.
 
 ### Copilot
 
