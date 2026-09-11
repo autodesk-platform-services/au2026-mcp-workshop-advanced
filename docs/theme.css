@@ -180,7 +180,7 @@ body {
 /* Inline code defaults to nowrap, which lets one long snippet (e.g. a
    generic type like Map<userId, UserAuthenticationProvider>) force the
    whole content column to overflow horizontally instead of wrapping. */
-.markdown-section code {
+.markdown-section :not(pre) > code {
     white-space: normal !important;
     word-break: break-word !important;
 }
